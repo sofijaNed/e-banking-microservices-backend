@@ -1,0 +1,41 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: api-gateway
+  main:
+    web-application-type: reactive
+  cloud:
+    gateway:
+      routes:
+        - id: auth-service
+          uri: http://auth-service:8081
+          predicates:
+            - Path=/auth/**
+        - id: user-service
+          uri: http://user-service:8082
+          predicates:
+            - Path=/users/**
+        - id: account-service
+          uri: http://account-service:8083
+          predicates:
+            - Path=/accounts/**
+          filters:
+            - AddRequestHeader=X-Gateway-Auth,valid
+        - id: transaction-service
+          uri: http://transaction-service:8085
+          predicates:
+            - Path=/transactions/**
+          filters:
+            - AddRequestHeader=X-Gateway-Auth,valid
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eurekaservice:8761/eureka/
+    register-with-eureka: true
+    fetch-registry: true

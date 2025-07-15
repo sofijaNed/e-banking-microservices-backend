@@ -1,0 +1,32 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: user-service
+  security:
+    user:
+      name: admin
+      password: 1234
+
+
+  datasource:
+    url: jdbc:mysql://mysql:3306/1ebanking
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: true
+    database-platform: org.hibernate.dialect.MySQL8Dialect
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eurekaservice:8761/eureka
+    register-with-eureka: true
+    fetch-registry: true
+
+

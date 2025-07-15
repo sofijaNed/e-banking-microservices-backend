@@ -1,0 +1,104 @@
+services:
+  mysql:
+    image: mysql:8
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: 1ebanking
+    ports:
+      - "3306:3306"
+    networks:
+      - backend
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  eurekaservice:
+    build:
+      context: ./eurekaservice
+    container_name: eurekaservice
+    ports:
+      - "8761:8761"
+    networks:
+      - backend
+
+#on koristi sve ove ispod
+  gateway:
+    build:
+      context: ./gateway
+    container_name: gateway
+    ports:
+      - "8084:8084"
+    depends_on:
+      - eurekaservice
+      - auth-service
+      - account-service
+      - transaction-service
+      - user-service
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eurekaservice:8761/eureka/
+    networks:
+      - backend
+
+  auth-service:
+    build:
+      context: ./auth-service
+    container_name: auth-service
+    ports:
+      - "8081:8081"
+    depends_on:
+      - mysql
+      - eurekaservice
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eurekaservice:8761/eureka/
+    networks:
+      - backend
+
+  user-service:
+    build:
+      context: ./user-service
+    container_name: user-service
+    ports:
+      - "8082:8082"
+    depends_on:
+      - mysql
+      - eurekaservice
+      - auth-service
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eurekaservice:8761/eureka/
+    networks:
+      - backend
+
+  account-service:
+    build:
+      context: ./account-service
+    container_name: account-service
+    ports:
+      - "8083:8083"
+    depends_on:
+      - mysql
+      - eurekaservice
+      - transaction-service
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eurekaservice:8761/eureka/
+    networks:
+      - backend
+
+
+  transaction-service:
+    build:
+      context: ./transaction-service
+    container_name: transaction-service
+    ports:
+      - "8085:8085"
+    depends_on:
+      - mysql
+      - eurekaservice
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eurekaservice:8761/eureka/
+    networks:
+      - backend
+networks:
+  backend:
