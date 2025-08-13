@@ -4,9 +4,10 @@ services:
     container_name: mysql
     environment:
       MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: 1ebanking
     ports:
       - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
     networks:
       - backend
     healthcheck:
@@ -46,15 +47,19 @@ services:
     build:
       context: ./auth-service
     container_name: auth-service
-    ports:
-      - "8081:8081"
+#    ports:
+#      - "8081:8081"
     depends_on:
       - mysql
       - eurekaservice
     environment:
       - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eurekaservice:8761/eureka/
+#      JAVA_TOOL_OPTIONS: >-
+#       -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
     networks:
       - backend
+    volumes:
+      - ./secrets/jwt:/run/secrets/jwt:ro
 
   user-service:
     build:
@@ -100,5 +105,7 @@ services:
       - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eurekaservice:8761/eureka/
     networks:
       - backend
+volumes:
+  mysql_data:
 networks:
   backend:

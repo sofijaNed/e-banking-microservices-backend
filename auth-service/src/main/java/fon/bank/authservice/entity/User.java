@@ -19,7 +19,7 @@ import lombok.Data;
 
 
 @Entity
-@Table(name="user")
+@Table(name="`user`")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -30,15 +30,19 @@ public class User implements Serializable, UserDetails {
     @Column(name="username")
     private String username;
 
-
     @Column(name="password")
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
 
-
     @Enumerated(EnumType.STRING)
-    @Column(name="role")
+    @Column(name="`role`")
     private Role role;
+
+    @Column(name = "two_factor_enabled", nullable = false)
+    private Boolean twoFactorEnabled = false;
+
+    @Column(name = "two_factor_method")
+    private String twoFactorMethod;
 
     @Override
     public boolean equals(Object o) {

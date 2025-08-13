@@ -1,5 +1,6 @@
 package fon.bank.authservice.security.auth;
 
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -12,10 +13,15 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class AuthenticationRequest {
 
-    @NotBlank(message = "Lozinka je obavezna")
+    @NotBlank(message = "Username is mandatory.")
     private String username;
 
 
-    @NotBlank(message = "Lozinka je obavezna")
+    @NotBlank(message = "Password is mandatory.")
     private String password;
+
+    private boolean use2fa;
+
+    @Email
+    private String email;
 }

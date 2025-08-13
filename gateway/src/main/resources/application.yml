@@ -33,6 +33,16 @@ spring:
         locator:
           enabled: true
           lower-case-service-id: true
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: http://auth-service:8081/.well-known/jwks.json
+logging:
+  level:
+    org.springframework.cloud.gateway: TRACE
+    org.springframework.security: DEBUG
 eureka:
   client:
     service-url:

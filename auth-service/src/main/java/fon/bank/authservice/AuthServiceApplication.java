@@ -8,6 +8,7 @@ import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 
 @SpringBootApplication
 @EnableDiscoveryClient
+@org.springframework.boot.context.properties.ConfigurationPropertiesScan
 public class AuthServiceApplication {
 
     @Bean
