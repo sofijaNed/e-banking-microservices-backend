@@ -2,23 +2,49 @@ package fon.bank.userservice.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.web.SecurityFilterChain;
+
+import org.springframework.core.convert.converter.Converter;
+
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        http
-                .csrf(csrf -> csrf.disable())
+    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http.csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/users/me").permitAll()
+                        .requestMatchers("/actuator/health").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/users/clients").hasRole("EMPLOYEE")
+                        .requestMatchers(HttpMethod.GET, "/users/employees").hasRole("EMPLOYEE")
+                        .requestMatchers(HttpMethod.GET, "/users/clients/{username}").hasAnyRole("EMPLOYEE", "CLIENT")
+                        .requestMatchers(HttpMethod.GET, "/users/employees/{username}").hasAnyRole("EMPLOYEE")
                         .anyRequest().authenticated()
+                )
+                .oauth2ResourceServer(oauth -> oauth
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthConverter()))
                 );
-
         return http.build();
+
+    }
+
+    private Converter<Jwt, ? extends AbstractAuthenticationToken> jwtAuthConverter() {
+        var converter = new org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(jwt -> {
+            String role = jwt.getClaimAsString("role");
+            if (role == null || role.isBlank()) return List.of();
+            return List.of(new SimpleGrantedAuthority(role));
+        });
+        return converter;
     }
 }

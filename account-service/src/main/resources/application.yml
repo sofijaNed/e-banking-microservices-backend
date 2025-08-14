@@ -5,13 +5,17 @@ spring:
   application:
     name: account-service
   security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: http://auth-service:8081/.well-known/jwks.json
     user:
       name: admin
       password: 1234
 
 
   datasource:
-    url: jdbc:mysql://mysql:3306/1ebanking
+    url: jdbc:mysql://mysql:3306/accountdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
     username: root
     password: root
     driver-class-name: com.mysql.cj.jdbc.Driver

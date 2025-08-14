@@ -6,6 +6,5 @@ import fon.bank.userservice.entity.Employee;
 
 @Repository
 public interface EmployeeRepository extends JpaRepository<Employee, Integer> {
-//    Employee findEmployeeByUserEmployeeUsername(String username);
     Employee findByUserEmployee(String username);
 }

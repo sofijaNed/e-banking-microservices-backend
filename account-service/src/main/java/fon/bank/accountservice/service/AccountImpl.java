@@ -2,103 +2,145 @@ package fon.bank.accountservice.service;
 
 import fon.bank.accountservice.dao.AccountRepository;
 import fon.bank.accountservice.dto.AccountDTO;
-import fon.bank.accountservice.dto.TransactionDTO;
+import fon.bank.accountservice.dto.AmountRequest;
+import fon.bank.accountservice.dto.ClientTransferRequest;
+import fon.bank.accountservice.dto.TransferRequest;
+import fon.bank.accountservice.entity.Account;
+import fon.bank.accountservice.exception.AccountNotFoundException;
+import fon.bank.accountservice.exception.InsufficientFundsException;
+import fon.bank.accountservice.exception.NotOwnerException;
+import fon.bank.accountservice.feign.UserClient;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.RequiredArgsConstructor;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.http.*;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
+@RequiredArgsConstructor
 public class AccountImpl{
 
     private final AccountRepository accountRepository;
     private final ModelMapper modelMapper;
-    private final RestTemplate restTemplate;
+    private final UserClient userClient;
 
-    @Autowired
-    public AccountImpl(AccountRepository accountRepository, ModelMapper modelMapper, RestTemplate restTemplate) {
-        this.accountRepository = accountRepository;
-        this.modelMapper = modelMapper;
-        this.restTemplate = restTemplate;
+    private String currentUsername() {
+        var auth = (JwtAuthenticationToken) SecurityContextHolder.getContext().getAuthentication();
+        return auth.getToken().getSubject();
     }
 
-    public List<AccountDTO> findByClientId(Integer clientId){
-//        List<Account> accounts = accountRepository.findAccountsByClient(clientId);
-//        List<AccountDTO> accountDTOS = new ArrayList<>();
-//
-//        List<Transaction> sentTransactions = new ArrayList<>();
-//        List<Transaction> receivedTransactions = new ArrayList<>();
-//
-//        for(Account account:accounts){
-//            accountDTOS.add(modelMapper.map(account, AccountDTO.class));
-            //ovde pozovi transaction servis i pokupi sve transakcije acconta(i sender i receiver). Necu da brisem ovde
-            //transaction repository, da bi videla kako treba da se vraca
-//        }
-//
-//        return accountDTOS;
+    private AccountDTO toDto(Account a) {
+        if (a == null) return null;
+        return modelMapper.map(a, AccountDTO.class);
+    }
 
-        String token = extractTokenFromRequest();
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("Authorization", "Bearer " + token);
-        headers.set("X-Gateway-Auth", "valid");
-        HttpEntity<?> entity = new HttpEntity<>(headers);
-        List<AccountDTO> accountDTOS =  accountRepository.findAll().stream()
-                .filter(account -> account.getClient().equals(clientId))
-                .map(account->modelMapper.map(account, AccountDTO.class))
+    @Transactional(readOnly = true)
+    public List<AccountDTO> myAccounts() {
+        String username = currentUsername();
+        var client = userClient.findClientByUsername(username);
+        if (client == null || client.getId() == null) {
+            throw new AccountNotFoundException("Client profile not found for " + username);
+        }
+        return accountRepository.findAccountsByClientId(client.getId())
+                .stream()
+                .map(this::toDto)
                 .toList();
-        for(AccountDTO accountDTO : accountDTOS){
-            String accountId = accountDTO.getId();
-
-            ResponseEntity<List<TransactionDTO>> senderResponse =
-                    restTemplate.exchange(
-                            "http://transaction-service/transactions/sender/" + accountId,
-                            HttpMethod.GET,
-                            entity,
-                            new ParameterizedTypeReference<>() {}
-                    );
-            accountDTO.setSentTransactions(senderResponse.getBody());
-
-            ResponseEntity<List<TransactionDTO>> receiverResponse =
-                    restTemplate.exchange(
-                            "http://transaction-service/transactions/receiver/" + accountId,
-                            HttpMethod.GET,
-                            entity,
-                            new ParameterizedTypeReference<>() {}
-                    );
-            accountDTO.setReceivedTransactions(receiverResponse.getBody());
-
-        }
-        return accountDTOS;
     }
 
-    public String extractTokenFromRequest() {
-        HttpServletRequest request = ((ServletRequestAttributes) RequestContextHolder
-                .currentRequestAttributes()).getRequest();
-
-        String authHeader = request.getHeader("Authorization");
-
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            return authHeader.substring(7);
-        }
-
-        return null;
+    @Transactional
+    public void withdraw(AmountRequest req) {
+        validateAmount(req.getAmount());
+        int rows = accountRepository.withdrawIfSufficient(req.getAccountNumber(), req.getAmount());
+        if (rows == 0) throw new InsufficientFundsException("Insufficient funds or account not found");
     }
 
-//    @Override
-//    public List<AccountDTO> findAll() {
-//        return accountRepository.findAll().stream().map(account->modelMapper.map(account, AccountDTO.class))
-//                .collect(Collectors.toList());
-//    }
+    @Transactional
+    public void deposit(AmountRequest req) {
+        validateAmount(req.getAmount());
+        int rows = accountRepository.deposit(req.getAccountNumber(), req.getAmount());
+        if (rows == 0) throw new AccountNotFoundException("Account not found");
+    }
 
-    //potencijalno ce ti trebati save ili update accounta, ali polako
+    // ========== TRANSFERS (LOCK + SAVE) ==========
+
+    @Transactional
+    public void transfer(TransferRequest req) {
+        basicTransfer(req.getFromAccountNumber(), req.getToAccountNumber(), req.getAmount(), null);
+    }
+
+    @Transactional
+    public void clientTransfer(ClientTransferRequest req) {
+        String username = currentUsername();
+        var client = userClient.findClientByUsername(username);
+        if (client == null || client.getId() == null) {
+            throw new NotOwnerException("Client profile not found");
+        }
+        basicTransfer(req.getFromAccountNumber(), req.getToAccountNumber(), req.getAmount(), client.getId());
+    }
+
+    // ========== helpers ==========
+
+    private void basicTransfer(String fromAccNo, String toAccNo, BigDecimal amount, Long mustOwnClientId) {
+        if (fromAccNo == null || toAccNo == null || fromAccNo.isBlank() || toAccNo.isBlank())
+            throw new IllegalArgumentException("Both account numbers are required");
+        if (fromAccNo.equals(toAccNo))
+            throw new IllegalArgumentException("From and To cannot be the same");
+        validateAmount(amount);
+
+        final String firstKey  = (fromAccNo.compareTo(toAccNo) <= 0) ? fromAccNo : toAccNo;
+        final String secondKey = (fromAccNo.compareTo(toAccNo) <= 0) ? toAccNo   : fromAccNo;
+
+        Account first  = accountRepository.findByAccountNumberForUpdate(firstKey)
+                .orElseThrow(() -> new AccountNotFoundException("Account " + firstKey + " not found"));
+        Account second = accountRepository.findByAccountNumberForUpdate(secondKey)
+                .orElseThrow(() -> new AccountNotFoundException("Account " + secondKey + " not found"));
+
+        Account from = fromAccNo.equals(firstKey) ? first : second;
+        Account to   = toAccNo.equals(secondKey) ? second : first;
+
+        if (mustOwnClientId != null && !mustOwnClientId.equals(from.getClientId())) {
+            throw new NotOwnerException("From-account does not belong to current client");
+        }
+
+        if (from.getBalance().compareTo(amount) < 0) {
+            throw new InsufficientFundsException("Insufficient funds");
+        }
+
+        from.setBalance(from.getBalance().subtract(amount));
+        from.setAvailableBalance(from.getAvailableBalance().subtract(amount));
+
+        to.setBalance(to.getBalance().add(amount));
+        to.setAvailableBalance(to.getAvailableBalance().add(amount));
+    }
+
+    private static void validateAmount(BigDecimal amount) {
+        if (amount == null || amount.signum() <= 0)
+            throw new IllegalArgumentException("Amount must be positive");
+    }
+
+    public List<AccountDTO> getAccountsByClientId(Long clientId) {
+        List<Account> accounts = accountRepository.findAccountsByClientId(clientId);
+        if (accounts == null || accounts.isEmpty()) return new ArrayList<>();
+
+        return accounts.stream()
+                .map(account -> {
+                    return modelMapper.map(account, AccountDTO.class);
+                })
+                .toList();
+    }
 
 
 }

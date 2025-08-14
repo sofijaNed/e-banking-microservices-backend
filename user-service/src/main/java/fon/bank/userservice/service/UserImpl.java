@@ -12,51 +12,46 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 public class UserImpl {
 
-    private final RestTemplate restTemplate;
-
     private final ClientRepository clientRepository;
-
     private final EmployeeRepository employeeRepository;
-
     private final ModelMapper modelMapper;
 
     @Autowired
-    public UserImpl(RestTemplate restTemplate, ClientRepository clientRepository, EmployeeRepository employeeRepository, ModelMapper modelMapper) {
-        this.restTemplate = restTemplate;
+    public UserImpl(ClientRepository clientRepository, EmployeeRepository employeeRepository, ModelMapper modelMapper) {
         this.clientRepository = clientRepository;
         this.employeeRepository = employeeRepository;
         this.modelMapper = modelMapper;
     }
 
-    public Object getCurrentUser(String token) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("Authorization", token);
-        HttpEntity<Void> request = new HttpEntity<>(headers);
+    public List<ClientDTO> findAllClients() {
+        return clientRepository.findAll().stream()
+                .map(client -> modelMapper.map(client, ClientDTO.class))
+                .toList();
+    }
 
-        ResponseEntity<UserTokenInfoDTO> response = restTemplate.exchange(
-                "http://auth-service/auth/validate",
-                HttpMethod.GET,
-                request,
-                UserTokenInfoDTO.class
-        );
-
-        if (response.getStatusCode() == HttpStatus.OK) {
-            UserTokenInfoDTO tokenInfo = response.getBody();
-            String username = tokenInfo.getUsername();
-
-            if (tokenInfo.getUserType().equals("ROLE_CLIENT")) {
-                Client client = clientRepository.findByUserClient(username);
-                return modelMapper.map(client, ClientDTO.class);
-            } else {
-                Employee emp = employeeRepository.findByUserEmployee(username);
-                return modelMapper.map(emp, EmployeeDTO.class);
-            }
+    public ClientDTO findByClientUsername(String username) throws Exception {
+        Client entity = clientRepository.findByUserClient(username);
+        if (entity == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Client not found: " + username);
         }
+        return modelMapper.map(entity, ClientDTO.class);
+    }
 
-        return null;
+    public List<EmployeeDTO> findAllEmployees() {
+        return employeeRepository.findAll().stream().map(employee->modelMapper.map(employee, EmployeeDTO.class))
+                .collect(Collectors.toList());
+    }
+
+    public EmployeeDTO findByEmployeeUsername(String username) throws Exception {
+        return modelMapper.map(employeeRepository.findByUserEmployee(username), EmployeeDTO.class);
     }
 }
