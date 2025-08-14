@@ -44,5 +44,7 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     int deposit(@Param("accountNumber") String accountNumber,
                 @Param("amount") BigDecimal amount);
 
+    Account findAccountByAccountNumber(String accountNumber);
+
 }
 

@@ -1,123 +1,168 @@
 package fon.bank.transactionservice.service;
 
-import fon.bank.transactionservice.entity.TransactionPK;
+import fon.bank.transactionservice.dto.AccountDTO;
+import fon.bank.transactionservice.dto.TransferCommand;
+import fon.bank.transactionservice.entity.TransactionStatus;
+import fon.bank.transactionservice.entity.TransactionType;
+import fon.bank.transactionservice.feign.AccountClient;
 import jakarta.transaction.Transactional;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Service;
 import fon.bank.transactionservice.dao.TransactionRepository;
 import fon.bank.transactionservice.dto.TransactionDTO;
 import fon.bank.transactionservice.entity.Transaction;
 
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 @Service
-public class TransactionImpl {
+public class TransactionImpl implements TransactionService{
 
-    private TransactionRepository transactionRepository;
-    private ModelMapper modelMapper;
+    private final TransactionRepository repo;
+    private final AccountClient accountClient;
+    private final ModelMapper mapper;
 
-    @Autowired
-    public TransactionImpl(TransactionRepository transactionRepository,
-                           ModelMapper modelMapper) {
-        this.transactionRepository = transactionRepository;
-        this.modelMapper = modelMapper;
+    public TransactionImpl(TransactionRepository repo, AccountClient accountClient, ModelMapper mapper) {
+        this.repo = repo;
+        this.accountClient = accountClient;
+        this.mapper = mapper;
     }
 
-//    @Override
-//    public List<TransactionDTO> findAll() {
-//        return transactionRepository.findAll().stream().map(transaction->modelMapper.map(transaction, TransactionDTO.class))
-//                .collect(Collectors.toList());
-//    }
-
-    public TransactionDTO findById(Object id) throws Exception {
-        TransactionPK transactionPK = (TransactionPK) id;
-        Optional<Transaction> transaction = transactionRepository.findById(transactionPK);
-        return transaction.map(value -> modelMapper.map(value, TransactionDTO.class)).orElse(null);
+    private String currentUsername() {
+        Authentication a = SecurityContextHolder.getContext().getAuthentication();
+        if (a instanceof JwtAuthenticationToken jat) return jat.getToken().getSubject();
+        return "system";
     }
 
-    public List<TransactionDTO> findBySenderId(String senderId){
-
-        return transactionRepository.findAll().stream()
-                .filter(transaction -> transaction.getTransactionPK().getSender().equals(senderId))
-                .map(transaction->modelMapper.map(transaction, TransactionDTO.class))
-                .toList();
+    private void validate(TransactionDTO req) {
+        if (req.getAmount() == null || req.getAmount().compareTo(BigDecimal.ZERO) <= 0)
+            throw new IllegalArgumentException("Amount must be greater than 0");
+        if (req.getSender().equals(req.getReceiver()))
+            throw new IllegalArgumentException("Sender and receiver must be different");
     }
 
-    public List<TransactionDTO> findByReceiverId(String receiverId){
+    private TransactionDTO toDto(Transaction t) {
+        return mapper.map(t, TransactionDTO.class);
+    }
 
-        return transactionRepository.findAll().stream()
-                .filter(transaction -> transaction.getTransactionPK().getReceiver().equals(receiverId))
-                .map(transaction->modelMapper.map(transaction, TransactionDTO.class))
-                .toList();
+    private Long resolveId(String accountNumber) {
+        AccountDTO a = accountClient.findByNumber(accountNumber);
+        if (a == null || a.getId() == null)
+            throw new IllegalArgumentException("Account not found: " + accountNumber);
+        return a.getId();
+    }
+
+    private void ensureCurrencyMatches(String senderNumber, String currency) {
+        AccountDTO a = accountClient.findByNumber(senderNumber);
+        if (a == null || a.getCurrency() == null)
+            throw new IllegalArgumentException("Cannot resolve currency for " + senderNumber);
+        if (!a.getCurrency().equalsIgnoreCase(currency))
+            throw new IllegalArgumentException("Currency mismatch: sender=" + a.getCurrency() + ", req=" + currency);
+    }
+
+    private Transaction bootstrapPending(TransactionDTO req) {
+        Transaction t = new Transaction();
+        t.setAmount(req.getAmount());
+        t.setCurrency(req.getCurrency());
+        t.setDescription(req.getDescription());
+        t.setReference(req.getReference());
+        t.setModel(req.getModel());
+        t.setNumber(req.getNumber());
+        t.setType(TransactionType.valueOf(req.getType().trim().toUpperCase()));
+        t.setStatus(TransactionStatus.PENDING);
+        t.setDate(LocalDateTime.now());
+        t.setCreatedBy(currentUsername());
+
+        t.setSenderAccountId(resolveId(req.getSender()));
+        t.setReceiverAccountId(resolveId(req.getReceiver()));
+        return repo.save(t);
+    }
+
+    private void callAccountService(boolean client, TransactionDTO req) {
+        TransferCommand cmd = new TransferCommand();
+        cmd.setFromAccountNumber(req.getSender());
+        cmd.setToAccountNumber(req.getReceiver());
+        cmd.setAmount(req.getAmount());
+        if (client) accountClient.clientTransfer(cmd);
+        else        accountClient.transfer(cmd);
+    }
+
+
+    @Transactional
+    public TransactionDTO createClientTransaction(TransactionDTO req) {
+        validate(req);
+        ensureCurrencyMatches(req.getSender(), req.getCurrency());
+        Transaction t = bootstrapPending(req);
+
+        try {
+            callAccountService(true, req);
+            t.setStatus(TransactionStatus.COMPLETED);
+            t.setUpdatedBy(currentUsername());
+            t.setUpdatedAt(Instant.now());
+            t = repo.save(t);
+            return toDto(t);
+        } catch (Exception ex) {
+            t.setStatus(TransactionStatus.FAILED);
+            String desc = t.getDescription() == null ? "" : (t.getDescription() + " | ");
+            t.setDescription(desc + "Error: " + ex.getMessage());
+            t.setUpdatedBy(currentUsername());
+            t.setUpdatedAt(Instant.now());
+            repo.save(t);
+            throw ex;
+        }
     }
 
     @Transactional
-    public TransactionDTO save(TransactionDTO transactionDTO) throws Exception {
+    public TransactionDTO createInternalTransaction(TransactionDTO req) {
+        validate(req);
+        ensureCurrencyMatches(req.getSender(), req.getCurrency());
+        Transaction t = bootstrapPending(req);
 
-        if (transactionDTO == null) {
-            throw new NullPointerException("Transakcija ne moze biti null");
+        try {
+            callAccountService(false, req);
+            t.setStatus(TransactionStatus.COMPLETED);
+            t.setUpdatedBy(currentUsername());
+            t.setUpdatedAt(Instant.now());
+            t = repo.save(t);
+            return toDto(t);
+        } catch (Exception ex) {
+            t.setStatus(TransactionStatus.FAILED);
+            String desc = t.getDescription() == null ? "" : (t.getDescription() + " | ");
+            t.setDescription(desc + "Error: " + ex.getMessage());
+            t.setUpdatedBy(currentUsername());
+            t.setUpdatedAt(Instant.now());
+            repo.save(t);
+            throw ex;
         }
+    }
 
-//        Transaction transaction = modelMapper.map(transactionDTO,Transaction.class);
-//        if (transactionDTO.getSenderDTO() == null) {
-//            throw new IllegalArgumentException("SenderDTO cannot be null");
-//        }
-//
-//        if (transactionDTO.getReceiverDTO() == null) {
-//            throw new IllegalArgumentException("ReceiverDTO cannot be null");
-//        }
-//        transaction.setSender(modelMapper.map(transactionDTO.getSenderDTO(), Account.class));
-//        transaction.setReceiver(modelMapper.map(transactionDTO.getReceiverDTO(), Account.class));
-//        Transaction savedTransaction = transactionRepository.save(transaction);
-//        transaction.getTransactionPK().setTransactionid(savedTransaction.getTransactionPK().getTransactionid());
-//        if(transaction.getSender() != null){
-//            Account senderAcc = transaction.getSender();
-//            senderAcc.setBalance(senderAcc.getBalance()-transaction.getAmount());
-//
-//            System.out.println(transaction.getSender().getClient());
-//            senderAcc.setClient(transaction.getSender().getClient());
-//            senderAcc.getSentTransactions().add(transaction);
-//
-//            AccountDTO accDTOSender = modelMapper.map(senderAcc, AccountDTO.class);
-//            accDTOSender.setClientDTO(modelMapper.map(transaction.getSender().getClient(), ClientDTO.class));
-//            accountImpl.save(accDTOSender);
-//
-//        }else{
-//
-//            System.out.println("Sender je prazan!");
-//        }
-//
-//        if(transaction.getReceiver() != null){
-//
-//            AccountDTO receiverAccDTO = accountImpl.findById(transaction.getReceiver().getId());
-//            if(receiverAccDTO != null){
-//                Account receiverAcc = modelMapper.map(receiverAccDTO, Account.class);
-//                if(!receiverAcc.getCurrency().equals(transaction.getSender().getCurrency())){
-//
-//                }
-//                Client cl = modelMapper.map(receiverAccDTO.getClientDTO(), Client.class);
-//                receiverAcc.setClient(cl);
-//                receiverAcc.setBalance(receiverAcc.getBalance()+transaction.getAmount());
-//
-//                receiverAcc.getReceivedTransactions().add(transaction);
-//
-//                AccountDTO accDTOSender = modelMapper.map(receiverAcc, AccountDTO.class);
-//                accDTOSender.setClientDTO(receiverAccDTO.getClientDTO());
-//                accountImpl.save(accDTOSender);
-//            }else{
-//                accountImpl.save(modelMapper.map(transaction.getReceiver(), AccountDTO.class));
-//            }
-//        }
-//        transactionPK.setTransactionid(6);
-//        transactionPK.setSender(transaction.getTransactionPK().getSender());
-//        transactionPK.setReceiver(transaction.getTransactionPK().getReceiver());
-//        transaction.setTransactionPK(transactionPK);
+    @Override
+    public List<TransactionDTO> findBySenderAccountNumber(String senderNumber) {
+        Long id = resolveId(senderNumber);
+        return repo.findBySenderAccountId(id).stream().map(this::toDto).toList();
+    }
 
-//        return modelMapper.map(savedTransaction, TransactionDTO.class);
-        return null;
+    @Override
+    public List<TransactionDTO> findByReceiverAccountNumber(String receiverNumber) {
+        Long id = resolveId(receiverNumber);
+        return repo.findByReceiverAccountId(id).stream().map(this::toDto).toList();
+    }
+
+    @Override
+    public TransactionDTO findById(Long id) throws Exception {
+        return repo.findById(id).map(this::toDto).orElse(null);
+    }
+
+    @Override
+    public List<TransactionDTO> findAll() {
+        return repo.findAll().stream().map(this::toDto).toList();
     }
 
 }

@@ -1,13 +1,12 @@
 package fon.bank.transactionservice.dao;
 
 import fon.bank.transactionservice.entity.Transaction;
-import fon.bank.transactionservice.entity.TransactionPK;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
 
-public interface TransactionRepository extends JpaRepository<Transaction, TransactionPK> {
+public interface TransactionRepository extends JpaRepository<Transaction, Long> {
 
-    List<Transaction> findTransactionsByTransactionPK_Sender(String accountid);
-    List<Transaction> findTransactionsByTransactionPK_Receiver(String accountid);
+    List<Transaction> findBySenderAccountId(Long senderAccountId);
+    List<Transaction> findByReceiverAccountId(Long receiverAccountId);
 }

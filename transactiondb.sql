@@ -1,0 +1,22 @@
+CREATE DATABASE IF NOT EXISTS transactiondb CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+USE transactiondb;
+
+CREATE TABLE IF NOT EXISTS `transaction` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `sender_account_id` BIGINT DEFAULT NULL,
+  `receiver_account_id` BIGINT DEFAULT NULL,
+  `amount` DECIMAL(19,4) NOT NULL,
+  `currency` VARCHAR(10) NOT NULL,
+  `description` VARCHAR(255) DEFAULT NULL,
+  `status` VARCHAR(50) DEFAULT NULL,
+  `reference` VARCHAR(100) DEFAULT NULL,
+  `model` VARCHAR(100) DEFAULT NULL,
+  `number` VARCHAR(100) DEFAULT NULL,
+  `transaction_type` VARCHAR(50) DEFAULT NULL,
+  `created_at` TIMESTAMP NULL DEFAULT NULL,
+  `updated_at` TIMESTAMP NULL DEFAULT NULL,
+  `created_by` VARCHAR(200) DEFAULT NULL,
+  `updated_by` VARCHAR(200) DEFAULT NULL,
+  `date` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

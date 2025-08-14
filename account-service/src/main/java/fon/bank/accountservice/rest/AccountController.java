@@ -27,6 +27,12 @@ public class AccountController {
         return ResponseEntity.ok(accountService.myAccounts());
     }
 
+    @GetMapping("/byaccountnumber")
+    @PreAuthorize("hasAnyAuthority('ROLE_CLIENT','ROLE_EMPLOYEE')")
+    public ResponseEntity<AccountDTO> myAccountByAccountNumber(@RequestParam("accountNumber") String accountNumber) {
+        return ResponseEntity.ok(accountService.getByAccountNumber(accountNumber));
+    }
+
     @PostMapping("/transfer/my")
     @PreAuthorize("hasAuthority('ROLE_CLIENT')")
     public ResponseEntity<Void> clientTransfer(@RequestBody ClientTransferRequest req) {

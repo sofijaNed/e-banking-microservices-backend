@@ -142,5 +142,9 @@ public class AccountImpl{
                 .toList();
     }
 
+    public AccountDTO getByAccountNumber(String accountNumber) {
+        return modelMapper.map(accountRepository.findAccountByAccountNumber(accountNumber), AccountDTO.class);
+    }
+
 
 }
