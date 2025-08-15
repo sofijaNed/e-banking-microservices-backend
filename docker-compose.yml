@@ -91,6 +91,23 @@ services:
     networks:
       - backend
 
+  loan-service:
+    build:
+      context: ./loan-service
+    container_name: loan-service
+    ports:
+      - "8086:8086"
+    depends_on:
+      - mysql
+      - eurekaservice
+      - auth-service
+      - account-service
+      - transaction-service
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eurekaservice:8761/eureka/
+    networks:
+      - backend
+
 
   transaction-service:
     build:

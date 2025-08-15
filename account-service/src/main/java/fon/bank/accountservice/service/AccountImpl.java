@@ -28,6 +28,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -144,6 +145,15 @@ public class AccountImpl{
 
     public AccountDTO getByAccountNumber(String accountNumber) {
         return modelMapper.map(accountRepository.findAccountByAccountNumber(accountNumber), AccountDTO.class);
+    }
+
+    public AccountDTO findById(Long id) throws Exception {
+        Optional<Account> accountOpt = accountRepository.findById(id);
+        if (accountOpt.isEmpty()) return null;
+
+        Account account = accountOpt.get();
+        return modelMapper.map(account, AccountDTO.class);
+
     }
 
 

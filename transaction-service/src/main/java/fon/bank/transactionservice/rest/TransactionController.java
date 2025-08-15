@@ -5,6 +5,7 @@ import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import fon.bank.transactionservice.dto.TransactionDTO;
 import fon.bank.transactionservice.service.TransactionImpl;
@@ -42,6 +43,13 @@ public class TransactionController {
     public ResponseEntity<TransactionDTO> get(@PathVariable Long id) throws Exception {
         TransactionDTO dto = service.findById(id);
         return dto == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(dto);
+    }
+
+    @PostMapping("/log")
+    @PreAuthorize("hasAnyAuthority('ROLE_CLIENT','ROLE_EMPLOYEE')")
+    public ResponseEntity<Void> log(@Valid @RequestBody TransactionDTO req) {
+        service.log(req);
+        return ResponseEntity.accepted().build();
     }
 
     @GetMapping

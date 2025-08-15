@@ -17,6 +17,10 @@ spring:
           uri: http://user-service:8082
           predicates:
             - Path=/users/**
+        - id: loan-service
+          uri: http://loan-service:8086
+          predicates:
+            - Path=/loans/**
         - id: account-service
           uri: http://account-service:8083
           predicates:

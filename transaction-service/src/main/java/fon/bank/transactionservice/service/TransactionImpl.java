@@ -165,4 +165,38 @@ public class TransactionImpl implements TransactionService{
         return repo.findAll().stream().map(this::toDto).toList();
     }
 
+    @Transactional
+    public void log(TransactionDTO req) {
+        if (req == null) throw new IllegalArgumentException("Body is required");
+        if (req.getAmount() == null || req.getAmount().signum() <= 0)
+            throw new IllegalArgumentException("Amount must be > 0");
+        if (req.getSender() == null || req.getReceiver() == null)
+            throw new IllegalArgumentException("Sender and receiver account numbers are required");
+        if (req.getSender().equals(req.getReceiver()))
+            throw new IllegalArgumentException("Sender and receiver must be different");
+
+        Transaction t = new Transaction();
+        t.setSenderAccountId(resolveId(req.getSender()));
+        t.setReceiverAccountId(resolveId(req.getReceiver()));
+
+        t.setAmount(req.getAmount());
+        t.setCurrency(req.getCurrency());
+        t.setDescription(req.getDescription());
+        t.setReference(req.getReference());
+        t.setModel(req.getModel());
+        t.setNumber(req.getNumber());
+        t.setDate(java.time.LocalDateTime.now());
+
+        if (req.getType() != null)
+            t.setType(TransactionType.valueOf(req.getType().trim().toUpperCase()));
+        if (req.getStatus() != null)
+            t.setStatus(TransactionStatus.valueOf(req.getStatus().trim().toUpperCase()));
+        else
+            t.setStatus(TransactionStatus.PENDING);
+
+        t.setCreatedBy(currentUsername());
+
+        repo.save(t);
+    }
+
 }

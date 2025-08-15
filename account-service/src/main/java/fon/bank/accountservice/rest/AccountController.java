@@ -67,5 +67,10 @@ public class AccountController {
         return ResponseEntity.ok(accounts);
     }
 
+    @GetMapping("/{id}")
+    public ResponseEntity<AccountDTO> getAccountsById(@PathVariable Long id) throws Exception {
+        return ResponseEntity.ok(accountService.findById(id));
+    }
+
 
 }

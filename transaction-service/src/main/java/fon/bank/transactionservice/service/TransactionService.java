@@ -11,4 +11,5 @@ public interface TransactionService {
     List<TransactionDTO> findByReceiverAccountNumber(String receiverNumber);
     TransactionDTO findById(Long id) throws Exception;
     List<TransactionDTO> findAll();
+    void log(TransactionDTO req);
 }
