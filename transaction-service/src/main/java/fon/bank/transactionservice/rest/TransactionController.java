@@ -45,7 +45,7 @@ public class TransactionController {
         return dto == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(dto);
     }
 
-    @PostMapping("/log")
+    @PostMapping(value = "/_log", consumes = "application/json")
     @PreAuthorize("hasAnyAuthority('ROLE_CLIENT','ROLE_EMPLOYEE')")
     public ResponseEntity<Void> log(@Valid @RequestBody TransactionDTO req) {
         service.log(req);

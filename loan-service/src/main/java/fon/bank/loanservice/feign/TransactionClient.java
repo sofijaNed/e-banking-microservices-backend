@@ -11,6 +11,6 @@ import org.springframework.web.bind.annotation.RequestBody;
         configuration = FeignAuthRelayConfig.class
 )
 public interface TransactionClient {
-    @PostMapping("/transactions/log")
+    @PostMapping(value = "/transactions/_log", consumes = "application/json")
     void log(@RequestBody TransactionDTO req);
 }

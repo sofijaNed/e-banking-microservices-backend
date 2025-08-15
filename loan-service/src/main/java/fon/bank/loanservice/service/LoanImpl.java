@@ -100,7 +100,7 @@ public class LoanImpl {
             remaining = remaining.subtract(principal).setScale(2, RoundingMode.HALF_UP);
 
             LoanPayment lp = new LoanPayment();
-            lp.setId(loan.getId());
+            lp.setLoan(loan);
             lp.setDueDate(LocalDate.now().plusMonths(i));
             lp.setAmount(monthly);
             lp.setCurrency(loan.getCurrency());
@@ -139,26 +139,34 @@ public class LoanImpl {
     }
 
     @Transactional
-    public void payInstallment(Long paymentId, PayInstallmentRequest req) {
-        LoanPayment p = payRepo.findById(paymentId).orElseThrow(() -> new IllegalArgumentException("Payment not found"));
+    public void payInstallment(Long paymentId, Long clientAccountId) {
+        LoanPayment p = payRepo.findById(paymentId)
+                .orElseThrow(() -> new IllegalArgumentException("Payment not found"));
         if (p.isPaid()) throw new IllegalStateException("Already paid");
-        if (req.getFromAccountNumber() == null || req.getFromAccountNumber().isBlank())
-            throw new IllegalArgumentException("fromAccountNumber is required");
+        Loan loan = p.getLoan();
+        if (loan == null) throw new IllegalStateException("Loan not linked to payment");
 
-        accountClient.clientTransfer(new TransferCommand(req.getFromAccountNumber(), BANK_ACCOUNT_NUMBER, p.getAmount()));
+        AccountDTO acc = accountClient.findById(clientAccountId);
+        if (acc == null || acc.getAccountNumber() == null || acc.getAccountNumber().isBlank()) {
+            throw new IllegalArgumentException("fromAccountNumber is required");
+        }
+        String fromAccount = acc.getAccountNumber();
+        String toAccount   = BANK_ACCOUNT_NUMBER;
+
+        accountClient.transfer(new TransferCommand(fromAccount, toAccount, p.getAmount()));
 
         TransactionDTO log = new TransactionDTO();
-        log.setSender(req.getFromAccountNumber());
-        log.setReceiver(BANK_ACCOUNT_NUMBER);
+        log.setSender(fromAccount);
+        log.setReceiver(toAccount);
         log.setAmount(p.getAmount());
-        log.setCurrency(p.getCurrency());
-        log.setDescription("Loan installment payment for loan #" + p.getId());
+        log.setCurrency(p.getCurrency() != null ? p.getCurrency() : loan.getCurrency());
+        log.setDescription("Loan installment payment for loan #" + loan.getId());
         log.setType("CLIENT_TO_BANK");
         log.setStatus("COMPLETED");
         transactionClient.log(log);
 
         p.setPaid(true);
-        p.setPaidAt(LocalDate.now());
+        p.setPaidAt(java.time.LocalDate.now());
         payRepo.save(p);
     }
 

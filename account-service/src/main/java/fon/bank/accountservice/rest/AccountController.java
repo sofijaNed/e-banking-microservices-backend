@@ -55,7 +55,7 @@ public class AccountController {
     }
 
     @PostMapping("/transfer")
-    @PreAuthorize("hasAuthority('ROLE_EMPLOYEE')")
+    @PreAuthorize("hasAnyAuthority('ROLE_CLIENT','ROLE_EMPLOYEE','ROLE_SYSTEM')")
     public ResponseEntity<Void> transfer(@RequestBody TransferRequest req) {
         accountService.transfer(req);
         return ResponseEntity.noContent().build();

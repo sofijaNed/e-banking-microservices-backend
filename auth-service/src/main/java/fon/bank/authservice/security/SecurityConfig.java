@@ -38,35 +38,21 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
-        http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .cors(corsCustomizer -> corsCustomizer.configurationSource(new CorsConfigurationSource() {
-
-                    @Override
-                    public CorsConfiguration getCorsConfiguration(HttpServletRequest request) {
-                        System.out.println("Proverava konfiguraciju server");
-                        CorsConfiguration config = new CorsConfiguration();
-                        config.setAllowedOrigins(List.of("http://localhost:4200"));
-                        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-                        config.setAllowCredentials(true);
-                        config.setAllowedHeaders(List.of("*"));
-                        config.setExposedHeaders(List.of("Authorization"));
-                        config.setMaxAge(3600L);
-                        return config;
-                    }
-                })).csrf((csrf) -> csrf.disable())
-                .authorizeHttpRequests((requests) -> requests
-//                        .requestMatchers("**").permitAll())
-//                        .requestMatchers(HttpMethod.POST, "/transactions/savePliz").hasAnyRole("CLIENT", "EMPLOYEE")
-                        .requestMatchers("/.well-known/**").permitAll()
-                        .requestMatchers("/auth/**").permitAll()
-                        .anyRequest().authenticated()  )
+        http
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(req -> req
+                        .requestMatchers("/.well-known/**", "/auth/**").permitAll()
+                        .anyRequest().authenticated()
+                )
                 .authenticationProvider(authenticationProvider)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
-                .logout(logoutConfigurer -> logoutConfigurer
+                .logout(logout -> logout
                         .logoutUrl("/auth/logout")
                         .addLogoutHandler(logoutHandler)
                         .logoutSuccessHandler((request, response, authentication) -> SecurityContextHolder.clearContext())
                 );
+        // NEMA .cors() ovde -> CORS ide samo preko gateway-a
         return http.build();
     }
 

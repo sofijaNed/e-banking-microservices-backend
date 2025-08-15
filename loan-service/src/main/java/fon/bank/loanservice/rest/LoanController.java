@@ -52,15 +52,16 @@ public class LoanController {
 
     @PostMapping("/payments/{paymentId}/pay")
     @PreAuthorize("hasAuthority('ROLE_CLIENT')")
-    public ResponseEntity<Void> pay(@PathVariable Long paymentId, @RequestBody PayInstallmentRequest req) {
-        service.payInstallment(paymentId, req);
-        return ResponseEntity.noContent().build();
+    public ResponseEntity<Void> pay(@PathVariable Long paymentId,
+                                    @RequestParam Long clientAccountId) {
+        service.payInstallment(paymentId, clientAccountId);
+        return ResponseEntity.accepted().build();
     }
 
-    @GetMapping("/status/{status}")
-    public ResponseEntity<List<LoanDTO>> byLoanStatus(@PathVariable String status) {
-        return ResponseEntity.ok(service.findAllByStatus(status));
-    }
+//    @GetMapping("/status/{status}")
+//    public ResponseEntity<List<LoanDTO>> byLoanStatus(@PathVariable String status) {
+//        return ResponseEntity.ok(service.findAllByStatus(status));
+//    }
 
     @GetMapping("/client/{clientId}")
     public ResponseEntity<List<LoanDTO>> byClient(@PathVariable Long clientId) {

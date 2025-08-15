@@ -31,6 +31,8 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers(HttpMethod.GET, "/accounts/my").hasAuthority("ROLE_CLIENT")
                         .requestMatchers(HttpMethod.POST, "/accounts/transfer/my").hasAuthority("ROLE_CLIENT")
+                        .requestMatchers(HttpMethod.POST, "/accounts/transfer")
+                        .hasAnyAuthority("ROLE_CLIENT","ROLE_EMPLOYEE","ROLE_SYSTEM")
                         .requestMatchers("/accounts/withdraw", "/accounts/deposit", "/accounts/transfer").hasAuthority("ROLE_EMPLOYEE")
                         .anyRequest().authenticated()
                 )
