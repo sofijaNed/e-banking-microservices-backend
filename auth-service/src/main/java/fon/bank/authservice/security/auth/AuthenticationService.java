@@ -2,12 +2,14 @@ package fon.bank.authservice.security.auth;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fon.bank.authservice.security.twofactorauth.OtpService;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -23,6 +25,12 @@ import fon.bank.authservice.security.token.TokenRepository;
 import fon.bank.authservice.security.token.TokenType;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Duration;
+import java.util.Date;
+import java.util.HexFormat;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -36,6 +44,20 @@ public class AuthenticationService {
     private final ModelMapper modelMapper;
     private final OtpService otpService;
 
+    @Value("${jwt.refresh-token-ms:604800000}")
+    private long refreshTokenMs;
+
+    @Value("${jwt.refresh-cookie-name:refresh_token}")
+    private String refreshCookieName;
+
+    @Value("${jwt.refresh-cookie-path:/}")
+    private String refreshCookiePath;
+
+    @Value("${jwt.refresh-cookie-secure:false}")
+    private boolean refreshCookieSecure;
+
+    @Value("${jwt.refresh-pepper:pepper-change-me}")
+    private String refreshPepper;
 
     public AuthenticationResponse authenticate(AuthenticationRequest request) {
         authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(request.getUsername(),request.getPassword()));
@@ -54,14 +76,14 @@ public class AuthenticationService {
                     .message("OTP poslat na email")
                     .build();
         }
-        var jwtToken = jwtService.generateToken(user);
-        var refreshToken = jwtService.generateRefreshToken(user);
+        String access  = jwtService.generateAccessToken(user);
+        String refresh = jwtService.generateRefreshToken(user);
         revokeAllMemberTokens(user);
-        saveMemberToken(user,jwtToken);
+        saveMemberToken(user,refresh);
 
         return AuthenticationResponse.builder()
-                .accessToken(jwtToken)
-                .refreshToken(refreshToken)
+                .accessToken(access)
+                .refreshToken(refresh)
                 .username(user.getUsername())
                 .role(user.getRole().name())
                 .message("Succesfull logging.")
@@ -70,15 +92,16 @@ public class AuthenticationService {
 
 
     public AuthenticationResponse completeAuthentication(User user) {
-        var jwtToken = jwtService.generateToken(user);
-        var refreshToken = jwtService.generateRefreshToken(user);
+        String access  = jwtService.generateAccessToken(user);
+        String refresh = jwtService.generateRefreshToken(user);
+
         revokeAllMemberTokens(user);
-        saveMemberToken(user, jwtToken);
+        saveMemberToken(user,refresh);
 
 
     return AuthenticationResponse.builder()
-            .accessToken(jwtToken)
-            .refreshToken(refreshToken)
+            .accessToken(access)
+            .refreshToken(refresh)
             .username(user.getUsername())
             .twoFactorRequired(false)
             .role(user.getRole().name())
@@ -91,63 +114,51 @@ public class AuthenticationService {
     public void refreshToken(HttpServletRequest request, HttpServletResponse response) throws IOException {
         System.out.println("In refresh token method.");
 
-        final String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
-        final String refreshToken;
-        final String userUsername;
-
-        // Check for Bearer token in the Authorization header
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            return; // No token present
-        }
-
-        refreshToken = authHeader.substring(7); // Extract refresh token
-        userUsername = jwtService.extractUsername(refreshToken);
-
-        if (userUsername == null) {
+        String rawRefresh = readLatestValidRefresh(request);
+        if (rawRefresh == null) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return;
         }
-        // If username is present and the token is valid
-        var user = userRepository.findByUsername(userUsername)
+
+        // 2) mora biti typ=refresh i neistekao
+        try {
+            String typ = jwtService.extractTyp(rawRefresh);
+            if (!"refresh".equals(typ) || jwtService.isTokenExpired(rawRefresh)) {
+                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                return;
+            }
+        } catch (Exception e) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            return;
+        }
+
+        String username = jwtService.extractUsername(rawRefresh);
+        User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
 
-        var storedRefreshOpt = tokenRepository.findByToken(refreshToken);
-        if (storedRefreshOpt.isEmpty() || storedRefreshOpt.get().isRevoked() || storedRefreshOpt.get().isExpired()) {
+        String hash = sha256(refreshPepper + rawRefresh);
+        var storedOpt = tokenRepository.findByToken(hash);
+        if (storedOpt.isEmpty() || storedOpt.get().isRevoked() || storedOpt.get().isExpired()) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return;
         }
+        Token stored = storedOpt.get();
+        stored.setRevoked(true);
+        stored.setExpired(true);
+        tokenRepository.save(stored);
 
-        // 2) Ensure signature and expiry valid
-        if (!jwtService.isTokenValid(refreshToken, user)) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            return;
-        }
+        String newAccess  = jwtService.generateAccessToken(user);
+        String newRefresh = jwtService.generateRefreshToken(user);
 
-        var storedRefresh = storedRefreshOpt.get();
-        storedRefresh.setRevoked(true);
-        storedRefresh.setExpired(true);
-        tokenRepository.save(storedRefresh);
-
-        // 4) Create new access and new refresh token
-        var newAccessToken = jwtService.generateToken(user);
-        var newRefreshToken = jwtService.generateRefreshToken(user);
-
-        saveMemberToken(user, newAccessToken); // access token saved as before
-        // save new refresh token with TokenType.REFRESH (or the same enum if extended)
-        var refreshTokenEntity = Token.builder()
-                .token(newRefreshToken)
-                .user(user)
-                .tokenType(TokenType.BEARER) // ideally REFRESH if you add it
-                .expired(false)
-                .revoked(false)
-                .build();
-        tokenRepository.save(refreshTokenEntity);
+        revokeAllMemberTokens(user);
+        saveMemberToken(user,newRefresh);
 
         var authResponse = AuthenticationResponse.builder()
-                .accessToken(newAccessToken)
-                .refreshToken(newRefreshToken)
+                .accessToken(newAccess)
+                .message("refreshed")
                 .build();
+
+        response.setStatus(HttpServletResponse.SC_OK);
         new ObjectMapper().writeValue(response.getOutputStream(), authResponse);
     }
 
@@ -165,14 +176,80 @@ public class AuthenticationService {
     }
 
 
-    public void saveMemberToken(User user, String jwtToken) {
+    public void saveMemberToken(User user, String rawRefresh) {
         var token = Token.builder()
                 .user(user)
-                .token(jwtToken)
-                .tokenType(TokenType.BEARER)
+                .token(sha256(refreshPepper + rawRefresh))
+                .tokenType(supportsRefreshEnum() ? TokenType.REFRESH : TokenType.BEARER)
                 .expired(false)
                 .revoked(false)
                 .build();
         tokenRepository.save(token);
     }
+
+    public void setRefreshCookie(HttpServletResponse response, String rawRefresh) {
+        deleteRefreshCookie(response, "/auth");
+        if (!"/".equals(refreshCookiePath)) deleteRefreshCookie(response, "/");
+
+        ResponseCookie cookie = ResponseCookie.from(refreshCookieName, rawRefresh)
+                .httpOnly(true)
+                .secure(refreshCookieSecure)
+                .sameSite("Strict")
+                .path(refreshCookiePath) // npr. "/"
+                .maxAge(Duration.ofMillis(refreshTokenMs))
+                .build();
+        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+    }
+
+    public void deleteRefreshCookie(HttpServletResponse response, String path) {
+        ResponseCookie del = ResponseCookie.from(refreshCookieName, "")
+                .httpOnly(true)
+                .secure(refreshCookieSecure)
+                .sameSite("Strict")
+                .path(path)
+                .maxAge(0)
+                .build();
+        response.addHeader(HttpHeaders.SET_COOKIE, del.toString());
+    }
+
+    private String readLatestValidRefresh(HttpServletRequest req) {
+        Cookie[] cs = Optional.ofNullable(req.getCookies()).orElse(new Cookie[0]);
+        String best = null;
+        Date bestIat = null;
+
+        for (Cookie c : cs) {
+            if (!refreshCookieName.equals(c.getName())) continue;
+            String val = c.getValue();
+            try {
+                if (!"refresh".equals(jwtService.extractTyp(val))) continue;
+                if (jwtService.isTokenExpired(val)) continue;
+                Date iat = Date.from(Optional.ofNullable(jwtService.extractIssuedAt(val)).orElseThrow());
+                if (best == null || (iat != null && (bestIat == null || iat.after(bestIat)))) {
+                    best = val;
+                    bestIat = iat;
+                }
+            } catch (Exception ignored) {}
+        }
+        return best;
+    }
+
+    private String sha256(String s) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(md.digest(s.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
+    }
+
+    private boolean supportsRefreshEnum() {
+        // Ako si dodala TokenType.REFRESH u enum – koristi ga; u suprotnom, ostani na BEARER bez menjanja šeme.
+        try {
+            TokenType.valueOf("REFRESH");
+            return true;
+        } catch (Exception ignore) {
+            return false;
+        }
+    }
+
 }

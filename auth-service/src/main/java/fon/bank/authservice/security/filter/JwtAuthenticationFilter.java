@@ -11,6 +11,9 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import fon.bank.authservice.security.config.JwtService;
@@ -24,58 +27,59 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 
     private final JwtService jwtService;
-
-
     private final UserDetailsService userDetailsService;
+    // private final TokenRepository tokenRepository; // STATeless: uklonjeno
 
-
-    private final TokenRepository tokenRepository;
+    private static final RequestMatcher PUBLIC = new OrRequestMatcher(
+            new AntPathRequestMatcher("/.well-known/**"),
+            new AntPathRequestMatcher("/auth/csrf", "GET"),
+            new AntPathRequestMatcher("/auth/authenticate", "POST"),
+            new AntPathRequestMatcher("/auth/verify-otp", "POST"),
+            new AntPathRequestMatcher("/auth/refreshToken", "POST"),
+            new AntPathRequestMatcher("/auth/logout", "POST")
+            // NAMERNO nema /auth/me
+    );
 
     @Override
     protected void doFilterInternal(
             @NonNull HttpServletRequest request,
             @NonNull HttpServletResponse response,
-            @NonNull FilterChain filterChain)
-            throws ServletException, IOException {
+            @NonNull FilterChain filterChain) throws ServletException, IOException {
 
-        String path = request.getServletPath();
-        if (path.startsWith("/.well-known/") || path.startsWith("/auth/")) {
+        // 1) Ne diramo javne rute
+        if (PUBLIC.matches(request)) {
             filterChain.doFilter(request, response);
             return;
         }
 
+        // 2) Izvuci Authorization header
         final String authHeader = request.getHeader("Authorization");
-        System.out.println(authHeader);
-        final String jwt;
-        final String userUsername;
-        if (authHeader == null ||!authHeader.startsWith("Bearer ")) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
             return;
         }
-        jwt = authHeader.substring(7);
-        System.out.println(jwt);
-        userUsername = jwtService.extractUsername(jwt);
-        System.out.println("Username je: " + userUsername);
-        if (userUsername != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            System.out.println("Ulazi u if ");
-            UserDetails userDetails = this.userDetailsService.loadUserByUsername(userUsername);
-            var isTokenValid = tokenRepository.findByToken(jwt)
-                    .map(t -> !t.isExpired() && !t.isRevoked())
-                    .orElse(false);
-            System.out.println("Pronalazi token." + isTokenValid);
-            if (jwtService.isTokenValid(jwt, userDetails) && isTokenValid) {
-                System.out.println("Token je validan.");
-                UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                        userDetails,
-                        null,
-                        userDetails.getAuthorities()
-                );
-                authToken.setDetails(
-                        new WebAuthenticationDetailsSource().buildDetails(request)
-                );
+        final String jwt = authHeader.substring(7);
+        final String username = jwtService.extractUsername(jwt);
+
+        if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+            UserDetails userDetails = this.userDetailsService.loadUserByUsername(username);
+
+            // 3) STATeless validacija: potpis + exp iz JWT-a
+            boolean valid = jwtService.isTokenValid(jwt, userDetails);
+
+            // Ako želiš „optional blacklist“, ostavi samo provere „revoked“:
+            // boolean notRevoked = tokenRepository.findByToken(jwt).map(t -> !t.isRevoked()).orElse(true);
+            // boolean valid = jwtService.isTokenValid(jwt, userDetails) && notRevoked;
+
+            if (valid) {
+                UsernamePasswordAuthenticationToken authToken =
+                        new UsernamePasswordAuthenticationToken(
+                                userDetails, null, userDetails.getAuthorities());
+                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authToken);
             }
         }
+
         filterChain.doFilter(request, response);
     }
 }
