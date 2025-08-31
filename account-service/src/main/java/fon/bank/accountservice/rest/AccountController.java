@@ -28,7 +28,7 @@ public class AccountController {
     }
 
     @GetMapping("/byaccountnumber")
-    @PreAuthorize("hasAnyAuthority('ROLE_CLIENT','ROLE_EMPLOYEE')")
+    @PreAuthorize("hasAuthority('ROLE_EMPLOYEE') or @authorization.ownsAccountNumber(#accountNumber)")
     public ResponseEntity<AccountDTO> myAccountByAccountNumber(@RequestParam("accountNumber") String accountNumber) {
         return ResponseEntity.ok(accountService.getByAccountNumber(accountNumber));
     }
@@ -61,12 +61,14 @@ public class AccountController {
         return ResponseEntity.noContent().build();
     }
 
+    @PreAuthorize("hasAuthority('ROLE_EMPLOYEE') or @authorization.isSelfClientId(#id)")
     @GetMapping("/clients/{id}")
     public ResponseEntity<List<AccountDTO>> getAccountsByClient(@PathVariable Long id) {
         List<AccountDTO> accounts = accountService.getAccountsByClientId(id);
         return ResponseEntity.ok(accounts);
     }
 
+    @PreAuthorize("hasAuthority('ROLE_EMPLOYEE') or @authorization.canAccessAccount(#id)")
     @GetMapping("/{id}")
     public ResponseEntity<AccountDTO> getAccountsById(@PathVariable Long id) throws Exception {
         return ResponseEntity.ok(accountService.findById(id));

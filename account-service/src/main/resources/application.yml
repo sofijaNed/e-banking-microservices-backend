@@ -30,7 +30,9 @@ spring:
       mode: always
   lifecycle:
     timeout-per-shutdown-phase: 30s
-
+logging:
+  level:
+    org.springframework.security: DEBUG
 eureka:
   client:
     service-url:

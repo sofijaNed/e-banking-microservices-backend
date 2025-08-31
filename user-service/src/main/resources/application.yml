@@ -25,7 +25,9 @@ spring:
       ddl-auto: none
     show-sql: true
     database-platform: org.hibernate.dialect.MySQL8Dialect
-
+logging:
+  level:
+    org.springframework.security: DEBUG
 eureka:
   client:
     service-url:

@@ -53,10 +53,8 @@ public class AuthenticationController {
             @Valid @RequestBody AuthenticationRequest request,
             HttpServletResponse response
     ) {
-        // Service vrati access + (tranziciono) refresh u body-ju
         AuthenticationResponse auth = authenticationService.authenticate(request);
 
-        // Ako NIJE 2FA korak, postavi refresh cookie i izbaci refresh iz body-ja
         if (!Boolean.TRUE.equals(auth.isTwoFactorRequired()) && auth.getRefreshToken() != null) {
             setRefreshCookie(response, auth.getRefreshToken());
 
@@ -140,7 +138,7 @@ public class AuthenticationController {
         ResponseCookie cookie = ResponseCookie.from(refreshCookieName, rawRefresh)
                 .httpOnly(true)
                 .secure(refreshCookieSecure)   // DEV=false, PROD=true (HTTPS)
-                .sameSite("Strict")
+                .sameSite("Lax")
                 .path(refreshCookiePath)       // "/" u DEV, po želji "/auth" ili path gateway-a u PROD
                 .maxAge(Duration.ofMillis(refreshTokenMs))
                 .build();
@@ -151,7 +149,7 @@ public class AuthenticationController {
         ResponseCookie del = ResponseCookie.from(refreshCookieName, "")
                 .httpOnly(true)
                 .secure(refreshCookieSecure)
-                .sameSite("Strict")
+                .sameSite("Lax")
                 .path(path)
                 .maxAge(0)
                 .build();

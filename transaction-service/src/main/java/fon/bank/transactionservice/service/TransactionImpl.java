@@ -5,9 +5,11 @@ import fon.bank.transactionservice.dto.TransferCommand;
 import fon.bank.transactionservice.entity.TransactionStatus;
 import fon.bank.transactionservice.entity.TransactionType;
 import fon.bank.transactionservice.feign.AccountClient;
+import fon.bank.transactionservice.security.Authorization;
 import jakarta.transaction.Transactional;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -15,6 +17,7 @@ import org.springframework.stereotype.Service;
 import fon.bank.transactionservice.dao.TransactionRepository;
 import fon.bank.transactionservice.dto.TransactionDTO;
 import fon.bank.transactionservice.entity.Transaction;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -28,11 +31,13 @@ public class TransactionImpl implements TransactionService{
     private final TransactionRepository repo;
     private final AccountClient accountClient;
     private final ModelMapper mapper;
+    private final Authorization authorization;
 
-    public TransactionImpl(TransactionRepository repo, AccountClient accountClient, ModelMapper mapper) {
+    public TransactionImpl(TransactionRepository repo, AccountClient accountClient, ModelMapper mapper, Authorization authorization) {
         this.repo = repo;
         this.accountClient = accountClient;
         this.mapper = mapper;
+        this.authorization = authorization;
     }
 
     private String currentUsername() {
@@ -97,6 +102,9 @@ public class TransactionImpl implements TransactionService{
 
     @Transactional
     public TransactionDTO createClientTransaction(TransactionDTO req) {
+        if (!authorization.ownsAccountNumber(req.getSender())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
         validate(req);
         ensureCurrencyMatches(req.getSender(), req.getCurrency());
         Transaction t = bootstrapPending(req);
@@ -145,6 +153,9 @@ public class TransactionImpl implements TransactionService{
 
     @Override
     public List<TransactionDTO> findBySenderAccountNumber(String senderNumber) {
+        if (!authorization.canAccessAccountNumber(senderNumber)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
         Long id = resolveId(senderNumber);
         return repo.findBySenderAccountId(id).stream().map(this::toDto).toList();
     }

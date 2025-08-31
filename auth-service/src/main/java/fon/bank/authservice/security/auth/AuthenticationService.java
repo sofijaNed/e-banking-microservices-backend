@@ -153,6 +153,7 @@ public class AuthenticationService {
         revokeAllMemberTokens(user);
         saveMemberToken(user,newRefresh);
 
+        setRefreshCookie(response, newRefresh);
         var authResponse = AuthenticationResponse.builder()
                 .accessToken(newAccess)
                 .message("refreshed")
@@ -194,8 +195,8 @@ public class AuthenticationService {
         ResponseCookie cookie = ResponseCookie.from(refreshCookieName, rawRefresh)
                 .httpOnly(true)
                 .secure(refreshCookieSecure)
-                .sameSite("Strict")
-                .path(refreshCookiePath) // npr. "/"
+                .sameSite("Lax")
+                .path(refreshCookiePath)
                 .maxAge(Duration.ofMillis(refreshTokenMs))
                 .build();
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());

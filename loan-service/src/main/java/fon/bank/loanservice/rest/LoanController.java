@@ -15,7 +15,7 @@ public class LoanController {
     private final LoanImpl service;
 
     @PostMapping("/submit")
-    @PreAuthorize("hasAuthority('ROLE_CLIENT')")
+    @PreAuthorize("hasAuthority('ROLE_CLIENT') and @authorization.ownsAccountNumber(#req.getAccountNumber())")
     public ResponseEntity<LoanResponseDTO> submit(@RequestBody LoanRequestDTO req) {
         return ResponseEntity.ok(service.submit(req));
     }
@@ -39,19 +39,19 @@ public class LoanController {
     }
 
     @GetMapping("/account/{accountId}")
-    @PreAuthorize("hasAnyAuthority('ROLE_CLIENT','ROLE_EMPLOYEE')")
+    @PreAuthorize("hasAuthority('ROLE_EMPLOYEE') or @authorization.canAccessAccountId(#accountId)")
     public ResponseEntity<List<LoanDTO>> byAccount(@PathVariable Long accountId) {
         return ResponseEntity.ok(service.byAccount(accountId));
     }
 
     @GetMapping("/{loanId}/payments")
-    @PreAuthorize("hasAnyAuthority('ROLE_CLIENT','ROLE_EMPLOYEE')")
+    @PreAuthorize("hasAuthority('ROLE_EMPLOYEE') or @authorization.canAccessLoan(#loanId)")
     public ResponseEntity<List<LoanPaymentDTO>> payments(@PathVariable Long loanId) {
         return ResponseEntity.ok(service.payments(loanId));
     }
 
     @PostMapping("/payments/{paymentId}/pay")
-    @PreAuthorize("hasAuthority('ROLE_CLIENT')")
+    @PreAuthorize("hasAuthority('ROLE_CLIENT') and @authorization.canAccessAccountId(#clientAccountId)")
     public ResponseEntity<Void> pay(@PathVariable Long paymentId,
                                     @RequestParam Long clientAccountId) {
         service.payInstallment(paymentId, clientAccountId);
@@ -63,6 +63,7 @@ public class LoanController {
 //        return ResponseEntity.ok(service.findAllByStatus(status));
 //    }
 
+    @PreAuthorize("hasAuthority('ROLE_EMPLOYEE') or @authorization.isSelf(#clientId)")
     @GetMapping("/client/{clientId}")
     public ResponseEntity<List<LoanDTO>> byClient(@PathVariable Long clientId) {
         return ResponseEntity.ok(service.findAllByClientId(clientId));

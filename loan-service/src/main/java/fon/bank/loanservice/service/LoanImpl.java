@@ -8,10 +8,13 @@ import fon.bank.loanservice.entity.LoanPayment;
 import fon.bank.loanservice.entity.LoanStatus;
 import fon.bank.loanservice.feign.AccountClient;
 import fon.bank.loanservice.feign.TransactionClient;
+import fon.bank.loanservice.security.Authorization;
 import lombok.RequiredArgsConstructor;
 import org.modelmapper.ModelMapper;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -26,6 +29,7 @@ public class LoanImpl {
     private final AccountClient accountClient;
     private final TransactionClient transactionClient;
     private final ModelMapper mapper;
+    private final Authorization authorization;
 
     private static final String BANK_ACCOUNT_NUMBER = "999-0000000001";
 
@@ -37,15 +41,21 @@ public class LoanImpl {
         return loanRepo.findByStatus(s).stream().map(l -> mapper.map(l, LoanDTO.class)).toList();
     }
     public List<LoanDTO> byAccount(Long accountId) {
+        if (!authorization.canAccessAccountId(accountId))
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         return loanRepo.findByAccountId(accountId).stream().map(l -> mapper.map(l, LoanDTO.class)).toList();
     }
     public List<LoanPaymentDTO> payments(Long loanId) {
+        if (!authorization.canAccessLoan(loanId))
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         return payRepo.findByLoanId(loanId).stream().map(p -> mapper.map(p, LoanPaymentDTO.class)).toList();
     }
 
 
     @Transactional
     public LoanResponseDTO submit(LoanRequestDTO dto) {
+        if (!authorization.ownsAccountNumber(dto.getAccountNumber()))
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         if (dto.getAmount() == null || dto.getAmount().signum() <= 0) throw new IllegalArgumentException("Invalid amount");
         if (dto.getTermMonths() == null || dto.getTermMonths() <= 0)  throw new IllegalArgumentException("Invalid term");
         if (dto.getAccountNumber() == null || dto.getAccountNumber().isBlank()) throw new IllegalArgumentException("Account number required");
@@ -140,11 +150,18 @@ public class LoanImpl {
 
     @Transactional
     public void payInstallment(Long paymentId, Long clientAccountId) {
+        if (!authorization.canAccessAccountId(clientAccountId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
         LoanPayment p = payRepo.findById(paymentId)
                 .orElseThrow(() -> new IllegalArgumentException("Payment not found"));
         if (p.isPaid()) throw new IllegalStateException("Already paid");
         Loan loan = p.getLoan();
         if (loan == null) throw new IllegalStateException("Loan not linked to payment");
+
+        if (!authorization.canAccessAccountId(loan.getAccountId())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
 
         AccountDTO acc = accountClient.findById(clientAccountId);
         if (acc == null || acc.getAccountNumber() == null || acc.getAccountNumber().isBlank()) {
@@ -198,6 +215,9 @@ public class LoanImpl {
 
 
     public List<LoanDTO> findAllByClientId(Long clientId) {
+        if (!authorization.isSelf(clientId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
         return loanRepo.findByAccountId(clientId).stream()
                 .map(loan -> {
                     LoanDTO dto = new LoanDTO();

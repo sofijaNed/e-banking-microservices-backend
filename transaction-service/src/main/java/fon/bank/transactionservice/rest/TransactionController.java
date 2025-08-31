@@ -19,26 +19,31 @@ public class TransactionController {
     private final TransactionService service;
     public TransactionController(TransactionService service) { this.service = service; }
 
+    @PreAuthorize("hasAuthority('ROLE_EMPLOYEE') or (hasAuthority('ROLE_CLIENT') and @authorization.ownsAccountNumber(#req.sender))")
     @PostMapping("/client")
     public ResponseEntity<TransactionDTO> client(@Valid @RequestBody TransactionDTO req) {
         return ResponseEntity.ok(service.createClientTransaction(req));
     }
 
+    @PreAuthorize("hasAuthority('ROLE_EMPLOYEE')")
     @PostMapping("/internal")
     public ResponseEntity<TransactionDTO> internal(@Valid @RequestBody TransactionDTO req) {
         return ResponseEntity.ok(service.createInternalTransaction(req));
     }
 
+    @PreAuthorize("hasAuthority('ROLE_EMPLOYEE') or @authorization.canAccessAccountNumber(#accountNumber)")
     @GetMapping("/by-sender/{accountNumber}")
     public List<TransactionDTO> bySender(@PathVariable String accountNumber) {
         return service.findBySenderAccountNumber(accountNumber);
     }
 
+    @PreAuthorize("hasAuthority('ROLE_EMPLOYEE') or @authorization.canAccessAccountNumber(#accountNumber)")
     @GetMapping("/by-receiver/{accountNumber}")
     public List<TransactionDTO> byReceiver(@PathVariable String accountNumber) {
         return service.findByReceiverAccountNumber(accountNumber);
     }
 
+    @PreAuthorize("hasAuthority('ROLE_EMPLOYEE')")
     @GetMapping("/{id}")
     public ResponseEntity<TransactionDTO> get(@PathVariable Long id) throws Exception {
         TransactionDTO dto = service.findById(id);
@@ -52,6 +57,7 @@ public class TransactionController {
         return ResponseEntity.accepted().build();
     }
 
+    @PreAuthorize("hasAuthority('ROLE_EMPLOYEE')")
     @GetMapping
     public List<TransactionDTO> all() { return service.findAll(); }
 }
