@@ -1,15 +1,28 @@
+name: ebanking_microservices
+
 services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server","--appendonly","yes"]
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD","redis-cli","ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      backend:
+        aliases: [ "redis" ]
+
   mysql:
     image: mysql:8
-    container_name: mysql
     environment:
       MYSQL_ROOT_PASSWORD: root
     ports:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-    networks:
-      - backend
+    networks: [ backend ]
     healthcheck:
       test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
       interval: 10s
@@ -19,110 +32,71 @@ services:
   eurekaservice:
     build:
       context: ./eurekaservice
-    container_name: eurekaservice
     ports:
       - "8761:8761"
-    networks:
-      - backend
+    networks: [ backend ]
 
 #on koristi sve ove ispod
   gateway:
-    build:
-      context: ./gateway
-    container_name: gateway
-    ports:
-      - "8084:8084"
+    build: { context: ./gateway }
+    ports: [ "8084:8084" ]
     depends_on:
-      - eurekaservice
-      - auth-service
-      - account-service
-      - transaction-service
-      - user-service
+      redis: { condition: service_healthy }
+      eurekaservice: { condition: service_started }
+      auth-service: { condition: service_started }
+      account-service: { condition: service_started }
+      transaction-service: { condition: service_started }
+      user-service: { condition: service_started }
     environment:
-      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eurekaservice:8761/eureka/
-    networks:
-      - backend
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: "http://eurekaservice:8761/eureka/"
+      SPRING_DATA_REDIS_HOST: "redis"
+      SPRING_DATA_REDIS_PORT: "6379"
+      FEATURE_RATELIMIT_ENABLED: "true"
+      JAVA_TOOL_OPTIONS: "-Dio.netty.resolver.dns.useJdkDnsResolver=true"
+    networks: [ backend ]
 
   auth-service:
-    build:
-      context: ./auth-service
-    container_name: auth-service
-#    ports:
-#      - "8081:8081"
-    depends_on:
-      - mysql
-      - eurekaservice
+    build: { context: ./auth-service }
+    depends_on: [ mysql, eurekaservice ]
     environment:
-      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eurekaservice:8761/eureka/
-#      JAVA_TOOL_OPTIONS: >-
-#       -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
-    networks:
-      - backend
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: "http://eurekaservice:8761/eureka/"
+    networks: [ backend ]
     volumes:
       - ./secrets/jwt:/run/secrets/jwt:ro
 
   user-service:
-    build:
-      context: ./user-service
-    container_name: user-service
-#    ports:
-#      - "8082:8082"
-    depends_on:
-      - mysql
-      - eurekaservice
-      - auth-service
+    build: { context: ./user-service }
+    depends_on: [ mysql, eurekaservice, auth-service ]
     environment:
-      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eurekaservice:8761/eureka/
-    networks:
-      - backend
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: "http://eurekaservice:8761/eureka/"
+    networks: [ backend ]
 
   account-service:
-    build:
-      context: ./account-service
-    container_name: account-service
-    ports:
-      - "8083:8083"
-    depends_on:
-      - mysql
-      - eurekaservice
-      - transaction-service
+    build: { context: ./account-service }
+    ports: [ "8083:8083" ]
+    depends_on: [ mysql, eurekaservice, transaction-service ]
     environment:
-      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eurekaservice:8761/eureka/
-    networks:
-      - backend
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: "http://eurekaservice:8761/eureka/"
+    networks: [ backend ]
 
   loan-service:
-    build:
-      context: ./loan-service
-    container_name: loan-service
-    ports:
-      - "8086:8086"
-    depends_on:
-      - mysql
-      - eurekaservice
-      - auth-service
-      - account-service
-      - transaction-service
+    build: { context: ./loan-service }
+    ports: [ "8086:8086" ]
+    depends_on: [ mysql, eurekaservice, auth-service, account-service, transaction-service ]
     environment:
-      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eurekaservice:8761/eureka/
-    networks:
-      - backend
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: "http://eurekaservice:8761/eureka/"
+    networks: [ backend ]
 
 
   transaction-service:
-    build:
-      context: ./transaction-service
-    container_name: transaction-service
-    ports:
-      - "8085:8085"
-    depends_on:
-      - mysql
-      - eurekaservice
+    build: { context: ./transaction-service }
+    ports: [ "8085:8085" ]
+    depends_on: [ mysql, eurekaservice ]
     environment:
-      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eurekaservice:8761/eureka/
-    networks:
-      - backend
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: "http://eurekaservice:8761/eureka/"
+    networks: [ backend ]
 volumes:
   mysql_data:
 networks:
   backend:
+    name: ebanking_backend

@@ -1,7 +1,13 @@
 server:
   port: 8084
+  forward-headers-strategy: framework
 
 spring:
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:redis}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+#      timeout: 2s
   application:
     name: api-gateway
   main:
@@ -13,20 +19,65 @@ spring:
           uri: http://auth-service:8081
           predicates:
             - Path=/auth/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@ipKeyResolver}"
+                deny-empty-key: true
+                redis-rate-limiter.replenishRate: 1
+                redis-rate-limiter.burstCapacity: 1
+                redis-rate-limiter.requestedTokens: 1
+
         - id: user-service
           uri: http://user-service:8082
           predicates:
             - Path=/users/**
+        - id: loan-pay
+          uri: http://loan-service:8086
+          predicates:
+            - Path=/loans/payments/*/pay
+            - Method=POST
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@principalOrIpKeyResolver}"
+                deny-empty-key: true
+                redis-rate-limiter.replenishRate: 3
+                redis-rate-limiter.burstCapacity: 6
         - id: loan-service
           uri: http://loan-service:8086
           predicates:
             - Path=/loans/**
+        - id: acc-transfer-my
+          uri: http://account-service:8083
+          predicates:
+            - Path=/accounts/transfer/my
+            - Method=POST
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@principalOrIpKeyResolver}"
+                deny-empty-key: true
+                redis-rate-limiter.replenishRate: 4
+                redis-rate-limiter.burstCapacity: 8
         - id: account-service
           uri: http://account-service:8083
           predicates:
             - Path=/accounts/**
           filters:
             - AddRequestHeader=X-Gateway-Auth,valid
+        - id: tx-client-post
+          uri: http://transaction-service:8085
+          predicates:
+            - Path=/transactions/client
+            - Method=POST
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@principalOrIpKeyResolver}"
+                deny-empty-key: true
+                redis-rate-limiter.replenishRate: 6
+                redis-rate-limiter.burstCapacity: 12
         - id: transaction-service
           uri: http://transaction-service:8085
           predicates:
@@ -47,6 +98,11 @@ logging:
   level:
     org.springframework.cloud.gateway: TRACE
     org.springframework.security: DEBUG
+    org.springframework.cloud.gateway.config.GatewayProperties: DEBUG
+    org.springframework.cloud.gateway.filter.factory.RequestRateLimiterGatewayFilterFactory: DEBUG
+    org.springframework.cloud.gateway.filter.ratelimit: DEBUG
+    org.springframework.data.redis: DEBUG
+    io.lettuce.core: INFO
 eureka:
   client:
     service-url:
