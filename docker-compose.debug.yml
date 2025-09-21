@@ -1,0 +1,16 @@
+services:
+  auth-service:
+    ports:
+      - "8081:8081"
+      - "127.0.0.1:5005:5005"
+    environment:
+      JAVA_TOOL_OPTIONS: >-
+        -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
+
+  user-service:
+    ports:
+      - "8082:8082"
+      - "127.0.0.1:5006:5006"
+    environment:
+      JAVA_TOOL_OPTIONS: >-
+        -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5006

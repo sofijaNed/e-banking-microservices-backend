@@ -21,6 +21,9 @@ spring:
     password: wwivnvrffchnjwlf
     properties:
       mail:
+        brand: "MojaBanka"
+        otp:
+          subject: "kod"
         smtp:
           auth: true
           starttls:
@@ -51,9 +54,13 @@ jwt:
   refresh-cookie-path: "/"
   refresh-cookie-secure: false
   refresh-pepper: "4c7b2a0fb8bfe3a9d88f1d2b77e4c9ab0fd3b6c98c2f447fbadd7a00a1bb9e34"
+s2s:
+  token: some-ultra-secret-dev-token
+
 logging:
   level:
     org.springframework.security: DEBUG
+    org.springframework.cloud.openfeign: DEBUG
 eureka:
   client:
     service-url:

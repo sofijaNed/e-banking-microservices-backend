@@ -7,7 +7,7 @@ import java.time.LocalDate;
 
 @Data
 public class LoanPaymentDTO {
-    private Long id;
+    private Integer installmentNo;
     private Long loanId;
     private LocalDate dueDate;
     private BigDecimal amount;

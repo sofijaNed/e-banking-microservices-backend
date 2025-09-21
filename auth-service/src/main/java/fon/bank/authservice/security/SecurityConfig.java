@@ -69,8 +69,10 @@ public class SecurityConfig {
                         .ignoringRequestMatchers(
                                 new AntPathRequestMatcher("/auth/authenticate", "POST"),
                                 new AntPathRequestMatcher("/auth/verify-otp",    "POST"),
-                                new AntPathRequestMatcher("/auth/csrf",          "GET")
-                                // NAPOMENA: refreshToken i logout NISU ignorisani — ostaju pod CSRF zaštitom
+                                new AntPathRequestMatcher("/auth/register/request", "POST"),
+                                new AntPathRequestMatcher("/auth/register/verify",  "POST"),
+                                new AntPathRequestMatcher("/auth/csrf",          "GET"),
+                                new AntPathRequestMatcher("/error")
                         )
                 )
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -79,9 +81,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/.well-known/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/auth/csrf").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/authenticate", "/auth/verify-otp").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/auth/register/request", "/auth/register/verify").permitAll()
                         // refresh/logout mogu biti permitAll (jer nema access tokena), ali CSRF ih štiti
                         .requestMatchers(HttpMethod.POST, "/auth/refreshToken", "/auth/logout").permitAll()
                         .requestMatchers(HttpMethod.GET, "/auth/me").authenticated()
+                        .requestMatchers("/error", "/error/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider)
@@ -102,10 +106,8 @@ public class SecurityConfig {
                         })
                 );
 
-        // 3) Ovaj filter SAMO re-iznosi već postojeći token u cookie (ne pravi novi)
         http.addFilterAfter(new CsrfCookieFilter(), CsrfFilter.class);
 
-        // .cors() preskačemo ako ide preko gateway/proxy-ja (kao što si i napisao)
         return http.build();
     }
 

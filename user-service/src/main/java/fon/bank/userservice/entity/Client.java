@@ -47,6 +47,12 @@ public class Client implements Serializable {
     @Column(name = "address")
     private String address;
 
+    @Column(nullable=false, length=13, unique=true)
+    private String jmbg;
+
+    @Column(length=20)
+    private String idCardNo;
+
     @Column(name = "username")
     private String userClient;
 

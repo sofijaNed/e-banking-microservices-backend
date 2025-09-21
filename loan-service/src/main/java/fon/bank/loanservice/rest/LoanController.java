@@ -15,7 +15,7 @@ public class LoanController {
     private final LoanImpl service;
 
     @PostMapping("/submit")
-    @PreAuthorize("hasAuthority('ROLE_CLIENT') and @authorization.ownsAccountNumber(#req.getAccountNumber())")
+    @PreAuthorize("hasAuthority('ROLE_CLIENT') and @authorization.ownsAccountNumber(#req.accountNumber)")
     public ResponseEntity<LoanResponseDTO> submit(@RequestBody LoanRequestDTO req) {
         return ResponseEntity.ok(service.submit(req));
     }
@@ -24,6 +24,14 @@ public class LoanController {
     @PreAuthorize("hasAuthority('ROLE_EMPLOYEE')")
     public ResponseEntity<LoanResponseDTO> approve(@PathVariable Long id, @RequestBody ApproveLoanRequest req) {
         return ResponseEntity.ok(service.approveAndDisburse(id, req));
+    }
+
+    @PutMapping("/{loanId}/reject")
+    @PreAuthorize("hasAuthority('ROLE_EMPLOYEE')")
+    public ResponseEntity<LoanResponseDTO> reject(@PathVariable Long loanId,
+                                                  @RequestParam Long employeeId,
+                                                  @RequestParam String note) {
+        return ResponseEntity.ok(service.reject(loanId, employeeId, note));
     }
 
     @GetMapping("/{id}")
@@ -50,18 +58,14 @@ public class LoanController {
         return ResponseEntity.ok(service.payments(loanId));
     }
 
-    @PostMapping("/payments/{paymentId}/pay")
-    @PreAuthorize("hasAuthority('ROLE_CLIENT') and @authorization.canAccessAccountId(#clientAccountId)")
-    public ResponseEntity<Void> pay(@PathVariable Long paymentId,
+    @PostMapping("/{loanId}/installments/{installmentNo}/pay")
+    @PreAuthorize("hasAuthority('ROLE_CLIENT') and @authorization.canAccessLoan(#loanId) and @authorization.canAccessAccountId(#clientAccountId)")
+    public ResponseEntity<Void> pay(@PathVariable Long loanId,
+                                    @PathVariable Integer installmentNo,
                                     @RequestParam Long clientAccountId) {
-        service.payInstallment(paymentId, clientAccountId);
-        return ResponseEntity.accepted().build();
+        service.payInstallment(loanId, installmentNo, clientAccountId);
+        return ResponseEntity.ok().build();
     }
-
-//    @GetMapping("/status/{status}")
-//    public ResponseEntity<List<LoanDTO>> byLoanStatus(@PathVariable String status) {
-//        return ResponseEntity.ok(service.findAllByStatus(status));
-//    }
 
     @PreAuthorize("hasAuthority('ROLE_EMPLOYEE') or @authorization.isSelf(#clientId)")
     @GetMapping("/client/{clientId}")

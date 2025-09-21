@@ -18,11 +18,12 @@ import java.time.LocalDate;
 @EqualsAndHashCode(callSuper = false)
 public class LoanPayment implements Serializable {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    @EmbeddedId
+    @EqualsAndHashCode.Include
+    private LoanPaymentId id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @MapsId("loanId")
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "loan_id", nullable = false)
     private Loan loan;
 

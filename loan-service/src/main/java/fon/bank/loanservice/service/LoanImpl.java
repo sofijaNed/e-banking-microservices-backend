@@ -15,6 +15,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import fon.bank.loanservice.entity.LoanPaymentId;
+import fon.bank.loanservice.entity.LoanStatus;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -48,7 +50,18 @@ public class LoanImpl {
     public List<LoanPaymentDTO> payments(Long loanId) {
         if (!authorization.canAccessLoan(loanId))
             throw new ResponseStatusException(HttpStatus.NOT_FOUND);
-        return payRepo.findByLoanId(loanId).stream().map(p -> mapper.map(p, LoanPaymentDTO.class)).toList();
+
+        return payRepo.findByIdLoanIdOrderByIdInstallmentNoAsc(loanId)
+                .stream()
+                .map(p -> {
+                    LoanPaymentDTO dto = mapper.map(p, LoanPaymentDTO.class);
+                    try {
+                        dto.setLoanId(p.getId().getLoanId());
+                        dto.setInstallmentNo(p.getId().getInstallmentNo());
+                    } catch (Exception ignore) {}
+                    return dto;
+                })
+                .toList();
     }
 
 
@@ -111,6 +124,7 @@ public class LoanImpl {
 
             LoanPayment lp = new LoanPayment();
             lp.setLoan(loan);
+            lp.setId(new LoanPaymentId(loan.getId(), i));
             lp.setDueDate(LocalDate.now().plusMonths(i));
             lp.setAmount(monthly);
             lp.setCurrency(loan.getCurrency());
@@ -149,13 +163,25 @@ public class LoanImpl {
     }
 
     @Transactional
-    public void payInstallment(Long paymentId, Long clientAccountId) {
+    public void payInstallment(Long loanId, Integer installmentNo, Long clientAccountId) {
         if (!authorization.canAccessAccountId(clientAccountId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         }
-        LoanPayment p = payRepo.findById(paymentId)
+
+        var nextUnpaidOpt = payRepo.findFirstByIdLoanIdAndPaidFalseOrderByIdInstallmentNoAsc(loanId);
+        if (nextUnpaidOpt.isEmpty()) {
+            throw new IllegalStateException("All installments are already paid");
+        }
+        var nextUnpaid = nextUnpaidOpt.get();
+        if (!nextUnpaid.getId().getInstallmentNo().equals(installmentNo)) {
+            throw new IllegalStateException("Next unpaid installment is #" + nextUnpaid.getId().getInstallmentNo());
+        }
+
+        var id = new LoanPaymentId(loanId, installmentNo);
+        LoanPayment p = payRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Payment not found"));
         if (p.isPaid()) throw new IllegalStateException("Already paid");
+
         Loan loan = p.getLoan();
         if (loan == null) throw new IllegalStateException("Loan not linked to payment");
 
@@ -165,7 +191,7 @@ public class LoanImpl {
 
         AccountDTO acc = accountClient.findById(clientAccountId);
         if (acc == null || acc.getAccountNumber() == null || acc.getAccountNumber().isBlank()) {
-            throw new IllegalArgumentException("fromAccountNumber is required");
+            throw new IllegalArgumentException("Client account not found");
         }
         String fromAccount = acc.getAccountNumber();
         String toAccount   = BANK_ACCOUNT_NUMBER;
@@ -177,14 +203,46 @@ public class LoanImpl {
         log.setReceiver(toAccount);
         log.setAmount(p.getAmount());
         log.setCurrency(p.getCurrency() != null ? p.getCurrency() : loan.getCurrency());
-        log.setDescription("Loan installment payment for loan #" + loan.getId());
+        log.setDescription("Loan installment payment: loan #" + loanId + ", installment #" + installmentNo);
         log.setType("CLIENT_TO_BANK");
         log.setStatus("COMPLETED");
         transactionClient.log(log);
 
         p.setPaid(true);
-        p.setPaidAt(java.time.LocalDate.now());
+        p.setPaidAt(LocalDate.now());
         payRepo.save(p);
+
+        boolean anyLeft = payRepo.existsByIdLoanIdAndPaidFalse(loanId);
+        if (!anyLeft) {
+            loan.setStatus(LoanStatus.PAID_OFF);
+            loan.setOutstandingBalance(BigDecimal.ZERO);
+            loanRepo.save(loan);
+        }
+    }
+
+    @Transactional
+    public LoanResponseDTO reject(Long loanId, Long employeeId, String note) {
+        if (note == null || note.isBlank()) throw new IllegalArgumentException("Rejection note is required");
+
+        Loan loan = loanRepo.findById(loanId).orElseThrow(() -> new IllegalArgumentException("Loan not found"));
+        if (loan.getStatus() != LoanStatus.PENDING)
+            throw new IllegalStateException("Only PENDING loans can be rejected");
+
+        loan.setApprovedBy(employeeId);
+        loan.setApprovedAt(java.time.LocalDate.now());
+        loan.setNote(note);
+        loan.setStatus(LoanStatus.REJECTED);
+
+        loanRepo.save(loan);
+
+        LoanResponseDTO resp = new LoanResponseDTO();
+        resp.setId(loan.getId());
+        resp.setStatus(loan.getStatus().name());
+        resp.setCreatedAt(loan.getDateIssued());
+        resp.setApprovedAt(loan.getApprovedAt());
+        resp.setApprovedByEmployeeId(loan.getApprovedBy());
+        resp.setNote(loan.getNote());
+        return resp;
     }
 
     public List<LoanDTO> findAllByStatus(String status) {
