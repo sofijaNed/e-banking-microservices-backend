@@ -1,6 +1,7 @@
 package fon.bank.authservice.security.auth;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import fon.bank.authservice.feign.DirectoryService;
 import fon.bank.authservice.security.twofactorauth.OtpService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -43,6 +44,7 @@ public class AuthenticationService {
     private final AuthenticationManager authenticationManager;
     private final ModelMapper modelMapper;
     private final OtpService otpService;
+    private final DirectoryService directoryService;
 
     @Value("${jwt.refresh-token-ms:604800000}")
     private long refreshTokenMs;
@@ -68,7 +70,8 @@ public class AuthenticationService {
         if (user.getTwoFactorEnabled() && Boolean.TRUE.equals(request.isUse2fa())) {
             String preAuthToken = jwtService.generatePreAuthToken(user);
 
-            otpService.generateAndSendOtp(user, request.getEmail(), "LOGIN_2FA");
+            String email = directoryService.resolveEmailForUser(user);
+            otpService.generateAndSendOtp(user, email, "LOGIN_2FA");
 
             return AuthenticationResponse.builder()
                     .twoFactorRequired(true)

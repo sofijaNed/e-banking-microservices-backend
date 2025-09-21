@@ -12,4 +12,6 @@ public interface UserClient {
 
     @GetMapping("/clients/{username}")
     ClientSummary findClientByUsername(@PathVariable String username);
+
+
 }

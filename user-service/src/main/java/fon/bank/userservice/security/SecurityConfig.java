@@ -31,6 +31,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/clients/lookup").permitAll()
                         .requestMatchers(HttpMethod.POST, "/clients/*/link-user").hasAuthority("SVC_AUTH")
                         .requestMatchers(HttpMethod.GET, "/users/clients").hasRole("EMPLOYEE")
+                        .requestMatchers(HttpMethod.GET, "/internal/users/**").hasAuthority("SVC_AUTH")
                         .requestMatchers(HttpMethod.GET, "/users/employees").hasRole("EMPLOYEE")
                         .requestMatchers(HttpMethod.GET, "/users/clients/{username}").hasAnyRole("EMPLOYEE", "CLIENT")
                         .requestMatchers(HttpMethod.GET, "/users/employees/{username}").hasAnyRole("EMPLOYEE")
