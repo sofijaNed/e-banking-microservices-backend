@@ -87,6 +87,17 @@ services:
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: "http://eurekaservice:8761/eureka/"
     networks: [ backend ]
 
+  audit-service:
+    build: { context: ./audit-service }
+    depends_on:
+      mysql: { condition: service_healthy }
+      eurekaservice: { condition: service_started }
+      auth-service: { condition: service_started }
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: "http://eurekaservice:8761/eureka/"
+    networks: [ backend ]
+    ports:
+      - "8099:8099"
 
   transaction-service:
     build: { context: ./transaction-service }

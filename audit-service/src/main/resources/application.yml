@@ -1,0 +1,32 @@
+server:
+  port: 8099
+
+spring:
+  application:
+    name: audit-service
+  datasource:
+    url: jdbc:mysql://mysql:3306/auditdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    database-platform: org.hibernate.dialect.MySQL8Dialect
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: http://auth-service:8081/.well-known/jwks.json
+    user:
+      name: admin
+      password: 1234
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eurekaservice:8761/eureka
+    register-with-eureka: true
+    fetch-registry: true

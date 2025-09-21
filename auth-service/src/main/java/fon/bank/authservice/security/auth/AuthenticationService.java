@@ -1,6 +1,8 @@
 package fon.bank.authservice.security.auth;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import fon.bank.authservice.dto.AuditEventDTO;
+import fon.bank.authservice.feign.AuditPublisher;
 import fon.bank.authservice.feign.DirectoryService;
 import fon.bank.authservice.security.twofactorauth.OtpService;
 import jakarta.servlet.http.Cookie;
@@ -24,6 +26,10 @@ import fon.bank.authservice.security.config.JwtService;
 import fon.bank.authservice.security.token.Token;
 import fon.bank.authservice.security.token.TokenRepository;
 import fon.bank.authservice.security.token.TokenType;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+import jakarta.servlet.http.HttpServletRequest;
+
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -45,6 +51,7 @@ public class AuthenticationService {
     private final ModelMapper modelMapper;
     private final OtpService otpService;
     private final DirectoryService directoryService;
+    private final AuditPublisher  auditPublisher;
 
     @Value("${jwt.refresh-token-ms:604800000}")
     private long refreshTokenMs;
@@ -62,16 +69,40 @@ public class AuthenticationService {
     private String refreshPepper;
 
     public AuthenticationResponse authenticate(AuthenticationRequest request) {
-        authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(request.getUsername(),request.getPassword()));
+        long t0 = System.nanoTime();
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
+            );
+        } catch (Exception ex) {
+            int durMs = (int)((System.nanoTime() - t0) / 1_000_000);
+
+            audit("LOGIN", "FAIL", request.getUsername(), 401, durMs,
+                    "{\"reason\":\"bad_credentials\"}",
+                    "{\"sanitized\":true,\"contains_pii\":false,\"password_plaintext\":false}");
+            throw ex;
+        }
 
         var user = userRepository.findByUsername(request.getUsername())
-                .orElseThrow(()->new BadCredentialsException("Data is not valid."));
+                .orElseThrow(()-> {
+                    int durMs = (int)((System.nanoTime() - t0) / 1_000_000);
+                    audit("LOGIN", "FAIL", request.getUsername(), 401, durMs,
+                            "{\"reason\":\"user_not_found\"}", null);
+                    return new BadCredentialsException("Podaci nisu validni.");
+                });
+
 
         if (user.getTwoFactorEnabled() && Boolean.TRUE.equals(request.isUse2fa())) {
             String preAuthToken = jwtService.generatePreAuthToken(user);
 
             String email = directoryService.resolveEmailForUser(user);
             otpService.generateAndSendOtp(user, email, "LOGIN_2FA");
+
+            int durMs = (int)((System.nanoTime() - t0) / 1_000_000);
+            audit("LOGIN_2FA_CHALLENGE", "SUCCESS", request.getUsername(), 200, durMs,
+                    "{\"method\":\"EMAIL\"}",
+                    "{\"otp_in_payload\":false,\"sanitized\":true}");
+
 
             return AuthenticationResponse.builder()
                     .twoFactorRequired(true)
@@ -83,6 +114,12 @@ public class AuthenticationService {
         String refresh = jwtService.generateRefreshToken(user);
         revokeAllMemberTokens(user);
         saveMemberToken(user,refresh);
+
+        int durMs = (int)((System.nanoTime() - t0) / 1_000_000);
+        audit("LOGIN", "SUCCESS", request.getUsername(), 200, durMs,
+                "{\"method\":\"password\"}",
+                "{\"sanitized\":true,\"contains_pii\":false,\"otp_in_payload\":false}");
+
 
         return AuthenticationResponse.builder()
                 .accessToken(access)
@@ -101,6 +138,8 @@ public class AuthenticationService {
         revokeAllMemberTokens(user);
         saveMemberToken(user,refresh);
 
+        audit("LOGIN_2FA_VERIFY", "SUCCESS", user.getUsername(), 200, null,
+                "{\"method\":\"otp\"}", null);
 
     return AuthenticationResponse.builder()
             .accessToken(access)
@@ -119,29 +158,36 @@ public class AuthenticationService {
 
         String rawRefresh = readLatestValidRefresh(request);
         if (rawRefresh == null) {
+            audit("TOKEN_REFRESH","FAIL",(String)null,401,null,
+                    "{\"reason\":\"no_valid_cookie\"}",null);
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return;
         }
 
-        // 2) mora biti typ=refresh i neistekao
         try {
             String typ = jwtService.extractTyp(rawRefresh);
             if (!"refresh".equals(typ) || jwtService.isTokenExpired(rawRefresh)) {
+                audit("TOKEN_REFRESH","FAIL",(String)null,401,null,
+                        "{\"reason\":\"invalid_typ_or_expired\"}",null);
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                 return;
             }
         } catch (Exception e) {
+            audit("TOKEN_REFRESH","FAIL",(String)null,401,null,
+                    "{\"reason\":\"parse_error\"}",null);
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return;
         }
 
         String username = jwtService.extractUsername(rawRefresh);
         User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+                .orElseThrow(() -> new UsernameNotFoundException("Korisnik nije pronadjen."));
 
         String hash = sha256(refreshPepper + rawRefresh);
         var storedOpt = tokenRepository.findByToken(hash);
         if (storedOpt.isEmpty() || storedOpt.get().isRevoked() || storedOpt.get().isExpired()) {
+            audit("TOKEN_REFRESH","FAIL", username, 401, null,
+                    "{\"reason\":\"not_found_or_revoked\"}", null);
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return;
         }
@@ -157,6 +203,8 @@ public class AuthenticationService {
         saveMemberToken(user,newRefresh);
 
         setRefreshCookie(response, newRefresh);
+        audit("TOKEN_REFRESH","SUCCESS", user.getUsername(), 200, null,
+                "{\"rotated\":true}", null);
         var authResponse = AuthenticationResponse.builder()
                 .accessToken(newAccess)
                 .message("refreshed")
@@ -254,6 +302,53 @@ public class AuthenticationService {
         } catch (Exception ignore) {
             return false;
         }
+    }
+
+    private HttpServletRequest currentRequest() {
+        var attrs = RequestContextHolder.getRequestAttributes();
+        return (attrs instanceof ServletRequestAttributes sra) ? sra.getRequest() : null;
+    }
+    private String clientIp() {
+        var r = currentRequest();
+        if (r == null) return null;
+        String fwd = r.getHeader("X-Forwarded-For");
+        return (fwd != null && !fwd.isBlank()) ? fwd.split(",")[0].trim() : r.getRemoteAddr();
+    }
+    private String userAgent() {
+        var r = currentRequest();
+        return (r == null) ? null : r.getHeader("User-Agent");
+    }
+    private String correlationId() {
+        var r = currentRequest();
+        String cid = (r != null) ? r.getHeader("X-Correlation-Id") : null;
+        return (cid == null || cid.isBlank()) ? java.util.UUID.randomUUID().toString() : cid;
+    }
+
+    // === helpers: audit send ===
+    private void audit(String action, String outcome, String username,
+                       Integer httpStatus, Integer durationMs,
+                       String detailsJson, String checksJson) {
+        AuditEventDTO ev = new AuditEventDTO();
+        ev.setService("auth-service");
+        ev.setAction(action);
+        ev.setOutcome(outcome);
+        ev.setPrincipal(username);
+        ev.setIp(clientIp());
+        ev.setUserAgent(userAgent());
+        ev.setResourceType("USER");
+        ev.setResourceId(username);
+        ev.setCorrelationId(correlationId());
+        var req = currentRequest();
+        if (req != null) {
+            ev.setHttpMethod(req.getMethod());
+            ev.setHttpPath(req.getRequestURI());
+        }
+        if (httpStatus != null) ev.setHttpStatus(httpStatus);
+        if (durationMs != null) ev.setDurationMs(durationMs);
+        if (detailsJson != null) ev.setDetailsJson(detailsJson);
+        if (checksJson != null) ev.setChecksJson(checksJson);
+
+        try { auditPublisher.send(ev); } catch (Exception ignore) { /* audit ne sme da sruši login */ }
     }
 
 }
