@@ -26,5 +26,22 @@ public class FeignConfig {
     }
 
     @Bean
+    public RequestInterceptor correlationInterceptor(
+            @Value("${app.correlation.header:X-Correlation-ID}") String header) {
+        return template -> {
+            String cid = org.slf4j.MDC.get("cid");
+            if (cid == null || cid.isBlank()) {
+                var attrs = org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+                if (attrs instanceof org.springframework.web.context.request.ServletRequestAttributes sra) {
+                    cid = sra.getRequest().getHeader(header);
+                }
+            }
+            if (cid != null && !cid.isBlank()) {
+                template.header(header, cid);
+            }
+        };
+    }
+
+    @Bean
     Logger.Level feignLoggerLevel() { return Logger.Level.FULL; }
 }

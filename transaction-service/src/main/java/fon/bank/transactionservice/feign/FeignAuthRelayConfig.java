@@ -1,6 +1,8 @@
 package fon.bank.transactionservice.feign;
 
 import feign.RequestInterceptor;
+import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -10,6 +12,22 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 @Configuration
 public class FeignAuthRelayConfig {
+    @Bean
+    public RequestInterceptor correlationInterceptor(
+            @Value("${app.correlation.header:X-Correlation-ID}") String header) {
+        return template -> {
+            String cid = MDC.get("cid");
+            if (cid == null || cid.isBlank()) {
+                var attrs = RequestContextHolder.getRequestAttributes();
+                if (attrs instanceof ServletRequestAttributes sra) {
+                    cid = sra.getRequest().getHeader(header);
+                }
+            }
+            if (cid != null && !cid.isBlank()) {
+                template.header(header, cid);
+            }
+        };
+    }
     @Bean
     public RequestInterceptor bearerForwardingInterceptor() {
         return template -> {

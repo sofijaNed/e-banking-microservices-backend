@@ -46,9 +46,9 @@ public class SecurityConfig {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(List.of("http://localhost:4200")); // bez * ako allowCredentials = true
         config.setAllowedMethods(List.of("GET","POST","PUT","DELETE","PATCH","OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization","Content-Type","X-XSRF-TOKEN"));
+        config.setAllowedHeaders(List.of("Authorization","Content-Type","X-XSRF-TOKEN","X-Correlation-ID","X-Correlation-Group"));
         config.setAllowCredentials(true);
-        config.setExposedHeaders(List.of("Authorization","Set-Cookie"));
+        config.setExposedHeaders(List.of("Authorization","Set-Cookie","X-Correlation-ID", "X-RateLimit-Remaining", "X-Total-Count"));
         config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

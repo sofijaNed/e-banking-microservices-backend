@@ -29,7 +29,7 @@ public class AuditController {
         e.setUserAgent(dto.getUserAgent());
         e.setResourceType(dto.getResourceType());
         e.setResourceId(dto.getResourceId());
-        e.setCorrelationId(dto.getCorrelationId());
+        e.setCorrelationId(org.slf4j.MDC.get("cid"));
         e.setHttpMethod(dto.getHttpMethod());
         e.setHttpPath(dto.getHttpPath());
         e.setHttpStatus(dto.getHttpStatus());

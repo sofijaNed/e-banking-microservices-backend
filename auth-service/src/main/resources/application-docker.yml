@@ -1,0 +1,45 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: auth-service
+
+  datasource:
+    url: jdbc:mysql://mysql:3306/authdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  mail:
+    host: mailhog
+    port: 1025
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+        brand: "MojaBanka"
+        otp:
+          subject: "kod"
+
+
+app:
+  mail:
+    brand: "MojaBanka"
+    otp:
+      subject: "kod"
+
+
+logging:
+  level:
+    org.springframework.security: DEBUG
+    org.springframework.cloud.openfeign: DEBUG
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eurekaservice:8761/eureka
+    register-with-eureka: true
+    fetch-registry: true

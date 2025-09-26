@@ -24,6 +24,10 @@ spring:
       name: admin
       password: 1234
 
+app:
+  correlation:
+    header: X-Correlation-ID
+
 eureka:
   client:
     service-url:

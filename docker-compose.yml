@@ -22,6 +22,7 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./_infra/mysql/init:/docker-entrypoint-initdb.d:ro
     networks: [ backend ]
     healthcheck:
       test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
@@ -60,6 +61,7 @@ services:
     depends_on: [ mysql, eurekaservice ]
     environment:
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: "http://eurekaservice:8761/eureka/"
+      SPRING_PROFILES_ACTIVE: docker
     networks: [ backend ]
     volumes:
       - ./secrets/jwt:/run/secrets/jwt:ro
@@ -105,6 +107,24 @@ services:
     depends_on: [ mysql, eurekaservice ]
     environment:
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: "http://eurekaservice:8761/eureka/"
+    networks: [ backend ]
+
+  adminer:
+    image: adminer:latest
+    ports: [ "8088:8080" ]
+    environment:
+      # default server unutar docker mreže
+      ADMINER_DEFAULT_SERVER: mysql
+    depends_on:
+      mysql: { condition: service_healthy }
+    networks: [ backend ]
+
+    # *** NOVO: MailHog (SMTP 1025 / UI 8025) ***
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
     networks: [ backend ]
 volumes:
   mysql_data:

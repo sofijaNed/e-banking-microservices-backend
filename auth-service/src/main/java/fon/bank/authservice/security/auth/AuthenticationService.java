@@ -18,7 +18,6 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.stereotype.Service;
 import fon.bank.authservice.dao.UserRepository;
 import fon.bank.authservice.entity.User;
@@ -28,7 +27,6 @@ import fon.bank.authservice.security.token.TokenRepository;
 import fon.bank.authservice.security.token.TokenType;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
-import jakarta.servlet.http.HttpServletRequest;
 
 
 import java.io.IOException;
@@ -68,6 +66,9 @@ public class AuthenticationService {
     @Value("${jwt.refresh-pepper:pepper-change-me}")
     private String refreshPepper;
 
+    @Value("${app.correlation.header:X-Correlation-ID}")
+    private String correlationHeader;
+
     public AuthenticationResponse authenticate(AuthenticationRequest request) {
         long t0 = System.nanoTime();
         try {
@@ -99,7 +100,7 @@ public class AuthenticationService {
             otpService.generateAndSendOtp(user, email, "LOGIN_2FA");
 
             int durMs = (int)((System.nanoTime() - t0) / 1_000_000);
-            audit("LOGIN_2FA_CHALLENGE", "SUCCESS", request.getUsername(), 200, durMs,
+            audit("LOGIN_2FA_SENT", "SUCCESS", request.getUsername(), 200, durMs,
                     "{\"method\":\"EMAIL\"}",
                     "{\"otp_in_payload\":false,\"sanitized\":true}");
 
@@ -158,7 +159,7 @@ public class AuthenticationService {
 
         String rawRefresh = readLatestValidRefresh(request);
         if (rawRefresh == null) {
-            audit("TOKEN_REFRESH","FAIL",(String)null,401,null,
+            audit("REFRESH_TOKEN","FAIL",(String)null,401,null,
                     "{\"reason\":\"no_valid_cookie\"}",null);
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return;
@@ -167,13 +168,13 @@ public class AuthenticationService {
         try {
             String typ = jwtService.extractTyp(rawRefresh);
             if (!"refresh".equals(typ) || jwtService.isTokenExpired(rawRefresh)) {
-                audit("TOKEN_REFRESH","FAIL",(String)null,401,null,
+                audit("REFRESH_TOKEN","FAIL",(String)null,401,null,
                         "{\"reason\":\"invalid_typ_or_expired\"}",null);
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                 return;
             }
         } catch (Exception e) {
-            audit("TOKEN_REFRESH","FAIL",(String)null,401,null,
+            audit("REFRESH_TOKEN","FAIL",(String)null,401,null,
                     "{\"reason\":\"parse_error\"}",null);
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return;
@@ -186,7 +187,7 @@ public class AuthenticationService {
         String hash = sha256(refreshPepper + rawRefresh);
         var storedOpt = tokenRepository.findByToken(hash);
         if (storedOpt.isEmpty() || storedOpt.get().isRevoked() || storedOpt.get().isExpired()) {
-            audit("TOKEN_REFRESH","FAIL", username, 401, null,
+            audit("REFRESH_TOKEN","FAIL", username, 401, null,
                     "{\"reason\":\"not_found_or_revoked\"}", null);
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return;
@@ -203,7 +204,7 @@ public class AuthenticationService {
         saveMemberToken(user,newRefresh);
 
         setRefreshCookie(response, newRefresh);
-        audit("TOKEN_REFRESH","SUCCESS", user.getUsername(), 200, null,
+        audit("REFRESH_TOKEN","SUCCESS", user.getUsername(), 200, null,
                 "{\"rotated\":true}", null);
         var authResponse = AuthenticationResponse.builder()
                 .accessToken(newAccess)
@@ -295,7 +296,6 @@ public class AuthenticationService {
     }
 
     private boolean supportsRefreshEnum() {
-        // Ako si dodala TokenType.REFRESH u enum – koristi ga; u suprotnom, ostani na BEARER bez menjanja šeme.
         try {
             TokenType.valueOf("REFRESH");
             return true;
@@ -319,12 +319,18 @@ public class AuthenticationService {
         return (r == null) ? null : r.getHeader("User-Agent");
     }
     private String correlationId() {
+        String cid = org.slf4j.MDC.get("cid");
+        if (cid != null && !cid.isBlank()) return cid;
+
         var r = currentRequest();
-        String cid = (r != null) ? r.getHeader("X-Correlation-Id") : null;
-        return (cid == null || cid.isBlank()) ? java.util.UUID.randomUUID().toString() : cid;
+        if (r != null) {
+            cid = r.getHeader(correlationHeader);
+            if (cid != null && !cid.isBlank()) return cid;
+        }
+
+        return java.util.UUID.randomUUID().toString();
     }
 
-    // === helpers: audit send ===
     private void audit(String action, String outcome, String username,
                        Integer httpStatus, Integer durationMs,
                        String detailsJson, String checksJson) {
@@ -348,7 +354,7 @@ public class AuthenticationService {
         if (detailsJson != null) ev.setDetailsJson(detailsJson);
         if (checksJson != null) ev.setChecksJson(checksJson);
 
-        try { auditPublisher.send(ev); } catch (Exception ignore) { /* audit ne sme da sruši login */ }
+        try { auditPublisher.send(ev); } catch (Exception ignore) {  }
     }
 
 }

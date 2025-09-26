@@ -2,21 +2,27 @@ package fon.bank.authservice.registration;
 
 import feign.FeignException;
 import fon.bank.authservice.dao.UserRepository;
+import fon.bank.authservice.dto.AuditEventDTO;
 import fon.bank.authservice.dto.ClientLookupRequestDTO;
 import fon.bank.authservice.dto.ClientLookupResponseDTO;
 import fon.bank.authservice.dto.LinkUserRequestDTO;
 import fon.bank.authservice.entity.Role;
 import fon.bank.authservice.entity.User;
+import fon.bank.authservice.feign.AuditPublisher;
 import fon.bank.authservice.feign.ClientServiceClient;
 import fon.bank.authservice.security.twofactorauth.EmailService;
 import fon.bank.authservice.security.twofactorauth.UserOtp;
 import fon.bank.authservice.security.twofactorauth.UserOtpRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.RandomStringUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.server.ResponseStatusException;
 import lombok.extern.slf4j.Slf4j;
 
@@ -34,15 +40,28 @@ public class RegistrationService {
     private final UserOtpRepository otpRepo;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
+    private final AuditPublisher auditPublisher;
+
+    @Value("${app.correlation.header:X-Correlation-ID}")
+    private String correlationHeader;
 
     public RegistrationTicketDTO request(RegistrationRequestDTO dto) {
+        long t0 = System.nanoTime();
         if (!dto.getPassword().equals(dto.getConfirmPassword())) {
+            int durMs = (int)((System.nanoTime() - t0) / 1_000_000);
+            audit("REGISTRATION_PASSWORD_MISMATCH", "FAIL", dto.getJmbg(), 400, durMs,
+                    "{\"method\":\"EMAIL\"}",
+                    "{\"otp_in_payload\":false,\"sanitized\":true}");
             throw bad("Lozinke se ne poklapaju");
         }
         if (userRepo.existsByUsername(dto.getUsername())) {
             throw conflict("Korisničko ime je zauzeto");
         }
         if (!Jmbg.isValid(dto.getJmbg())) {
+            int durMs = (int)((System.nanoTime() - t0) / 1_000_000);
+            audit("REGISTRATION_JMBG_INVALID", "FAIL", dto.getJmbg(), 400, durMs,
+                    "{\"method\":\"EMAIL\"}",
+                    "{\"otp_in_payload\":false,\"sanitized\":true}");
             throw bad("Neispravan JMBG");
         }
 
@@ -58,6 +77,10 @@ public class RegistrationService {
         }
 
         if (client.getUsername() != null && !client.getUsername().isBlank()) {
+            int durMs = (int)((System.nanoTime() - t0) / 1_000_000);
+            audit("REGISTRATION_CLIENT_ALREADY_EXISTS", "FAIL", dto.getJmbg(), 422, durMs,
+                    "{\"method\":\"EMAIL\"}",
+                    "{\"otp_in_payload\":false,\"sanitized\":true}");
             throw conflict("Klijent je već registrovan");
         }
 
@@ -65,6 +88,10 @@ public class RegistrationService {
         if (email == null || email.isBlank()) {
             // fallback: dozvoli email iz zahteva ako ga šalješ sa fronta
             if (dto.getEmail() == null || dto.getEmail().isBlank()) {
+                int durMs = (int)((System.nanoTime() - t0) / 1_000_000);
+                audit("REGISTRATION_EMAIL_NOT_FOUND", "FAIL", dto.getJmbg(), 422, durMs,
+                        "{\"method\":\"EMAIL\"}",
+                        "{\"otp_in_payload\":false,\"sanitized\":true}");
                 throw bad("Nije pronađen email za klijenta");
             }
             email = dto.getEmail();
@@ -95,12 +122,17 @@ public class RegistrationService {
 //                String.format("Vaš verifikacioni kod je: %s%nVaži 10 minuta.", rawOtp));
 
         emailService.sendOtp(email, rawOtp);
+        int durMs = (int)((System.nanoTime() - t0) / 1_000_000);
+        audit("REGISTRATION_OTP_SENT", "SUCCESS", dto.getJmbg(), 200, durMs,
+                "{\"method\":\"EMAIL\"}",
+                "{\"otp_in_payload\":false,\"sanitized\":true}");
 
         return new RegistrationTicketDTO(ticketId, maskEmail(email));
     }
 
     @Transactional
     public void verify(RegistrationVerifyDTO dto) {
+        long t0 = System.nanoTime();
         var now = LocalDateTime.now();
         UserOtp otp = otpRepo.findFirstByPurposeAndTicketIdAndUsedFalseAndExpiresAtAfter(
                 "REGISTRATION", dto.getTicketId(), now
@@ -152,6 +184,11 @@ public class RegistrationService {
         if (updated != 1) {
             throw bad("Ažuriranje OTP zapisa nije uspelo");
         }
+
+        int durMs = (int)((System.nanoTime() - t0) / 1_000_000);
+        audit("REGISTRATION_OTP_VERIFY", "SUCCESS", u.getUsername(), 200, durMs,
+                "{\"method\":\"EMAIL\"}",
+                "{\"otp_in_payload\":false,\"sanitized\":true}");
     }
 
     private static ResponseStatusException bad(String m) {
@@ -167,5 +204,58 @@ public class RegistrationService {
         int at = email.indexOf('@');
         if (at <= 1) return "***";
         return email.charAt(0) + "***" + email.substring(at);
+    }
+
+    private HttpServletRequest currentRequest() {
+        var attrs = RequestContextHolder.getRequestAttributes();
+        return (attrs instanceof ServletRequestAttributes sra) ? sra.getRequest() : null;
+    }
+    private String clientIp() {
+        var r = currentRequest();
+        if (r == null) return null;
+        String fwd = r.getHeader("X-Forwarded-For");
+        return (fwd != null && !fwd.isBlank()) ? fwd.split(",")[0].trim() : r.getRemoteAddr();
+    }
+    private String userAgent() {
+        var r = currentRequest();
+        return (r == null) ? null : r.getHeader("User-Agent");
+    }
+    private String correlationId() {
+        String cid = org.slf4j.MDC.get("cid");
+        if (cid != null && !cid.isBlank()) return cid;
+
+        var r = currentRequest();
+        if (r != null) {
+            cid = r.getHeader(correlationHeader);
+            if (cid != null && !cid.isBlank()) return cid;
+        }
+
+        return java.util.UUID.randomUUID().toString();
+    }
+
+    private void audit(String action, String outcome, String username,
+                       Integer httpStatus, Integer durationMs,
+                       String detailsJson, String checksJson) {
+        AuditEventDTO ev = new AuditEventDTO();
+        ev.setService("auth-service");
+        ev.setAction(action);
+        ev.setOutcome(outcome);
+        ev.setPrincipal(username);
+        ev.setIp(clientIp());
+        ev.setUserAgent(userAgent());
+        ev.setResourceType("USER");
+        ev.setResourceId(username);
+        ev.setCorrelationId(correlationId());
+        var req = currentRequest();
+        if (req != null) {
+            ev.setHttpMethod(req.getMethod());
+            ev.setHttpPath(req.getRequestURI());
+        }
+        if (httpStatus != null) ev.setHttpStatus(httpStatus);
+        if (durationMs != null) ev.setDurationMs(durationMs);
+        if (detailsJson != null) ev.setDetailsJson(detailsJson);
+        if (checksJson != null) ev.setChecksJson(checksJson);
+
+        try { auditPublisher.send(ev); } catch (Exception ignore) {  }
     }
 }

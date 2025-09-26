@@ -34,6 +34,9 @@ eureka:
 logging:
   level:
     org.springframework.security: DEBUG
+app:
+  correlation:
+    header: X-Correlation-ID
 management:
   endpoints:
     web:

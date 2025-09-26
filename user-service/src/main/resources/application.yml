@@ -28,6 +28,9 @@ spring:
 logging:
   level:
     org.springframework.security: DEBUG
+app:
+  correlation:
+    header: X-Correlation-ID
 eureka:
   client:
     service-url:

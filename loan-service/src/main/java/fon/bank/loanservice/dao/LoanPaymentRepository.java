@@ -13,4 +13,8 @@ public interface LoanPaymentRepository extends JpaRepository<LoanPayment, LoanPa
     List<LoanPayment> findByIdLoanIdOrderByIdInstallmentNoAsc(Long loanId);
 
     List<LoanPayment> findByPaidFalseAndDueDateBefore(LocalDate date);
+
+    Optional<LoanPayment> findFirstByIdLoanIdAndPaidFalseOrderByIdInstallmentNoAsc(Long loanId);
+
+    boolean existsByIdLoanIdAndPaidFalse(Long loanId);
 }

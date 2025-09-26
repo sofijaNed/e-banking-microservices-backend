@@ -103,6 +103,9 @@ logging:
     org.springframework.cloud.gateway.filter.ratelimit: DEBUG
     org.springframework.data.redis: DEBUG
     io.lettuce.core: INFO
+app:
+  correlation:
+    header: X-Correlation-ID
 eureka:
   client:
     service-url:
